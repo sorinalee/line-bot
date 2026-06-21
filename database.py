@@ -57,15 +57,17 @@ class Database:
                 (group_id, user_id, title, dt_str),
             )
 
-    def get_upcoming_events(self, group_id: str, days: int = 7) -> list:
+        def get_upcoming_events(self, group_id: str, days: int = 7) -> list:
         """取得未來 N 天的行程（依時間排序）"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        end_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
         with self._get_conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM events WHERE group_id = ? ORDER BY datetime ASC",
-                (group_id,),
+                "SELECT * FROM events WHERE group_id = ? AND datetime >= ? AND datetime < ? ORDER BY datetime ASC",
+                (group_id, today, end_date),
             ).fetchall()
-        # 因為日期格式可能不一致（Gemini 解析的），先全部回傳再讓前端處理
         return [dict(r) for r in rows]
+
 
     def delete_event_by_keyword(self, group_id: str, keyword: str) -> dict | None:
         with self._get_conn() as conn:
