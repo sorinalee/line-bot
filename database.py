@@ -60,7 +60,8 @@ class Database:
     def get_upcoming_events(self, group_id: str, days: int = 7) -> list:
         """取得未來 N 天的行程（依時間排序）"""
         today = datetime.now().strftime("%Y-%m-%d")
-        end_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+                end_date = (datetime.now() + timedelta(days=max(days, 1))).strftime("%Y-%m-%d")
+
         with self._get_conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM events WHERE group_id = ? AND datetime >= ? AND datetime < ? ORDER BY datetime ASC",
