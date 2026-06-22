@@ -554,9 +554,13 @@ def handle_plan_trip(data: dict, group_id: str, user_id: str) -> str:
         tomorrow = now_tw() + timedelta(days=1)
         start_date = tomorrow.strftime("%Y-%m-%d")
 
-    itinerary = gemini.plan_trip(destination, start_date, days, preferences)
+    try:
+        itinerary = gemini.plan_trip(destination, start_date, days, preferences)
+    except Exception as e:
+        return f"規劃行程時發生錯誤：{type(e).__name__}"
+
     if not itinerary:
-        return "規劃行程時發生問題，請稍後再試"
+        return "規劃行程時 AI 未回傳有效資料，請稍後再試"
 
     saved_count = 0
     lines = [f"🗺️ {destination} {days}天行程規劃：", ""]
@@ -564,21 +568,17 @@ def handle_plan_trip(data: dict, group_id: str, user_id: str) -> str:
     for day_plan in itinerary:
         date = day_plan.get("date", "")
         title = day_plan.get("title", "")
-        spots = day_plan.get("spots", [])
+        activities = day_plan.get("activities", [])
 
         if date and title:
             db.add_event(group_id, user_id, title, date)
             saved_count += 1
 
         lines.append(f"📅 {date}　{title}")
-        for spot in spots:
-            time = spot.get("time", "")
-            name = spot.get("name", "")
-            desc = spot.get("description", "")
-            line = f"  • {time} {name}"
-            if desc:
-                line += f"（{desc}）"
-            lines.append(line)
+        for act in activities:
+            t = act.get("time", "")
+            a = act.get("activity", "")
+            lines.append(f"  • {t} {a}")
         lines.append("")
 
     lines.append(f"✅ 已將 {saved_count} 天行程存入行程表")
