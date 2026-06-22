@@ -1,6 +1,6 @@
 """
 圖片生成模組 — 早安圖等圖片生成功能
-使用 google-genai SDK + Imagen 3 (免費版) 生成圖片
+使用 google-genai SDK + Gemini 2.5 Flash Image 生成圖片
 圖片透過 Catbox.moe 匿名上傳取得公開 URL 供 LINE 傳送
 """
 
@@ -13,10 +13,9 @@ from google.genai import types
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
-# Imagen 模型名稱（免費版 Nano Banana）
-IMAGEN_MODEL = "imagen-4.0-fast-generate-001"
+IMAGE_MODEL = "gemini-2.5-flash-image"
 
-MORNING_THEMES_EN = [
+MORNING_THEMES = [
     ("Chinese ink wash painting", "中國風山水畫"),
     ("cute animals illustration", "可愛小動物"),
     ("modern city lifestyle", "現代都會風格"),
@@ -34,20 +33,27 @@ def _get_client():
     return genai.Client(api_key=GEMINI_API_KEY)
 
 
-def _generate_with_imagen(prompt: str) -> bytes | None:
-    """呼叫 Imagen 3 生成圖片，回傳 image_bytes"""
+def _generate_image(prompt: str) -> tuple[bytes | None, str]:
+    """呼叫 Gemini 生成圖片，回傳 (image_bytes, text_content)"""
     client = _get_client()
-    response = client.models.generate_images(
-        model=IMAGEN_MODEL,
-        prompt=prompt,
-        config=types.GenerateImagesConfig(
-            number_of_images=1,
+    response = client.models.generate_content(
+        model=IMAGE_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_modalities=["IMAGE", "TEXT"],
         ),
     )
 
-    if response.generated_images:
-        return response.generated_images[0].image.image_bytes
-    return None
+    image_data = None
+    text_content = ""
+
+    for part in response.candidates[0].content.parts:
+        if part.inline_data and part.inline_data.data:
+            image_data = part.inline_data.data
+        elif part.text:
+            text_content = part.text.strip()
+
+    return image_data, text_content
 
 
 def generate_morning_image() -> dict:
@@ -55,20 +61,21 @@ def generate_morning_image() -> dict:
     if not GEMINI_API_KEY:
         return {"error": "Gemini API 尚未設定"}
 
-    theme_en, theme_zh = random.choice(MORNING_THEMES_EN)
+    theme_en, theme_zh = random.choice(MORNING_THEMES)
 
     prompt = (
-        f"A bright, warm, and hopeful 'Good Morning' greeting card illustration. "
-        f"Style: {theme_en}. "
-        f"The image should feature the large Chinese characters '早安' (Good Morning) "
-        f"prominently displayed with clear contrast against the background. "
-        f"Include a short positive phrase in Chinese below it. "
-        f"The overall mood should be uplifting, colorful, and full of positive energy. "
-        f"Square format, high quality illustration."
+        f"Generate a bright, warm 'Good Morning' greeting card illustration.\n"
+        f"Style: {theme_en}.\n"
+        f"Requirements:\n"
+        f"- Include the large Chinese characters '早安' prominently\n"
+        f"- Add a short positive Chinese phrase below it\n"
+        f"- Bright, warm, hopeful mood\n"
+        f"- Text must be clearly readable against the background\n"
+        f"- Square format, high quality illustration"
     )
 
     try:
-        image_data = _generate_with_imagen(prompt)
+        image_data, text_content = _generate_image(prompt)
 
         if not image_data:
             return {"error": "未能生成圖片，請稍後再試"}
@@ -90,7 +97,7 @@ def generate_custom_image(prompt: str) -> dict:
         return {"error": "Gemini API 尚未設定"}
 
     try:
-        image_data = _generate_with_imagen(prompt)
+        image_data, text_content = _generate_image(prompt)
 
         if not image_data:
             return {"error": "未能生成圖片，請稍後再試"}
@@ -99,7 +106,7 @@ def generate_custom_image(prompt: str) -> dict:
         if not img_url:
             return {"error": "圖片上傳失敗，請稍後再試"}
 
-        return {"url": img_url, "text": ""}
+        return {"url": img_url, "text": text_content}
 
     except Exception as e:
         print(f"[Image Error] {e}")
