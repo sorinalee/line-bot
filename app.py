@@ -17,6 +17,7 @@ from linebot.v3.messaging import (
     MessagingApi,
     ReplyMessageRequest,
     TextMessage,
+    ImageMessage,
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from linebot.v3.exceptions import InvalidSignatureError
@@ -25,6 +26,7 @@ from database import Database
 from gemini_handler import GeminiHandler
 from weather_handler import get_weather
 from exchange_handler import get_exchange_rate
+from image_handler import generate_morning_image, generate_custom_image
 from scheduler import start_scheduler
 
 # ── 時區設定 ─────────────────────────────────────────────
@@ -85,21 +87,38 @@ def handle_message(event):
 
     # 處理特殊指令
     if user_msg in ["幫助", "help", "指令", "?"]:
-        reply = get_help_text()
+        result = get_help_text()
     elif user_msg in ["debug", "偵錯", "檢查資料"]:
-        reply = handle_debug(group_id)
+        result = handle_debug(group_id)
     else:
-        reply = process_with_gemini(user_msg, group_id, user_id)
+        result = process_with_gemini(user_msg, group_id, user_id)
 
-    # 回覆
+    # 回覆（支援文字或圖片+文字）
     with ApiClient(configuration) as api_client:
         messaging_api = MessagingApi(api_client)
-        messaging_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=reply)],
+        if isinstance(result, dict) and result.get("image_url"):
+            messages = [
+                ImageMessage(
+                    original_content_url=result["image_url"],
+                    preview_image_url=result["image_url"],
+                ),
+            ]
+            if result.get("text"):
+                messages.append(TextMessage(text=result["text"]))
+            messaging_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=messages,
+                )
             )
-        )
+        else:
+            reply = result if isinstance(result, str) else str(result)
+            messaging_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text=reply)],
+                )
+            )
 
 
 # ── Gemini 意圖解析 + 執行 ──────────────────────────────
@@ -172,6 +191,10 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str) -> str:
             return handle_query_birthdays(group_id)
         elif action == "delete_birthday":
             return handle_delete_birthday(data, group_id)
+        elif action == "generate_image":
+            return handle_generate_image(data)
+        elif action == "plan_trip":
+            return handle_plan_trip(data, group_id, user_id)
         elif action == "summary":
             return handle_summary(group_id)
         elif action == "chat":
@@ -538,6 +561,74 @@ def handle_delete_birthday(data: dict, group_id: str) -> str:
     return f"找不到「{name}」的生日紀錄"
 
 
+# ── 圖片生成 ──────────────────────────────────────────
+def handle_generate_image(data: dict):
+    img_type = data.get("type", "morning")
+
+    if img_type == "morning":
+        result = generate_morning_image()
+    else:
+        prompt = data.get("prompt", "")
+        if not prompt:
+            return "請告訴我想生成什麼圖片，例如「幫我畫一隻貓」"
+        result = generate_custom_image(prompt)
+
+    if result.get("error"):
+        return f"⚠️ {result['error']}"
+
+    text = f"🎨 今日主題：{result.get('theme', '自訂')}" if result.get("theme") else ""
+    if result.get("text"):
+        text = f"{text}\n{result['text']}" if text else result["text"]
+
+    return {"image_url": result["url"], "text": text or None}
+
+
+# ── 旅遊規劃 ──────────────────────────────────────────
+def handle_plan_trip(data: dict, group_id: str, user_id: str) -> str:
+    destination = data.get("destination", "")
+    start_date = data.get("start_date", "")
+    days = data.get("days", 2)
+    preferences = data.get("preferences", "")
+
+    if not destination:
+        return "請告訴我你想去哪裡，例如「幫我規劃花蓮三天兩夜」"
+    if not start_date:
+        tomorrow = now_tw() + timedelta(days=1)
+        start_date = tomorrow.strftime("%Y-%m-%d")
+
+    itinerary = gemini.plan_trip(destination, start_date, days, preferences)
+    if not itinerary:
+        return "規劃行程時發生問題，請稍後再試"
+
+    saved_count = 0
+    lines = [f"🗺️ {destination} {days}天行程規劃：", ""]
+
+    for day_plan in itinerary:
+        date = day_plan.get("date", "")
+        title = day_plan.get("title", "")
+        spots = day_plan.get("spots", [])
+
+        if date and title:
+            db.add_event(group_id, user_id, title, date)
+            saved_count += 1
+
+        lines.append(f"📅 {date}　{title}")
+        for spot in spots:
+            time = spot.get("time", "")
+            name = spot.get("name", "")
+            desc = spot.get("description", "")
+            line = f"  • {time} {name}"
+            if desc:
+                line += f"（{desc}）"
+            lines.append(line)
+        lines.append("")
+
+    lines.append(f"✅ 已將 {saved_count} 天行程存入行程表")
+    lines.append("💡 輸入「小助理 這週行程」即可查看")
+
+    return "\n".join(lines)
+
+
 # ── Debug ──────────────────────────────────────────────
 def handle_debug(group_id: str) -> str:
     """列出資料庫中的原始資料，方便偵錯"""
@@ -620,13 +711,22 @@ def get_help_text() -> str:
 • 小助理 100美金多少台幣
 • 小助理 日幣匯率
 
+【早安圖／圖片生成】
+• 小助理 早安圖
+• 小助理 幫我畫一隻在月球上的貓
+
+【旅遊規劃】
+• 小助理 幫我規劃花蓮三天兩夜
+• 小助理 7/10出發去台南玩兩天
+
 【其他】
 • 小助理 天氣（查詢天氣預報）
 • 小助理 目前狀態（總覽）
 • 小助理 幫助
 
 💡 用自然的方式說就好，我會自己理解！
-⏰ 每天早上 7:30 會自動推播今日行程和天氣"""
+⏰ 每天早上 7:30 會自動推播今日行程和天氣
+🎨 圖片生成需明確要求才會產圖"""
 
 
 # ── 啟動排程 ───────────────────────────────────────────

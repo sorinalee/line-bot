@@ -16,6 +16,8 @@
 | **生日提醒** | 支援國曆與農曆，批次輸入，每日自動提醒壽星與近期生日 |
 | **天氣查詢** | 中央氣象署 36 小時天氣預報，支援全台各縣市 |
 | **匯率查詢** | 18 種常用幣別即時匯率，支援金額換算 |
+| **早安圖／圖片生成** | Gemini AI 生成早安圖或自訂圖片，每日隨機主題風格，明確呼叫才會產圖 |
+| **旅遊行程規劃** | AI 規劃多天旅遊行程，自動存入行程表，支援偏好設定 |
 | **每日推播** | 每天早上 7:30 自動推播當日行程＋天氣＋生日＋待辦＋購物摘要 |
 | **自然語言** | 不用記指令，像跟人說話一樣 |
 | **群組獨立** | 每個群組有自己的資料空間，加入多個群組互不干擾 |
@@ -56,9 +58,11 @@
    LINE_CHANNEL_ACCESS_TOKEN=你的Channel_Access_Token
    GEMINI_API_KEY=你的Gemini_API_Key
    CWA_API_KEY=你的氣象署API_Key
+   IMGUR_CLIENT_ID=你的Imgur_Client_ID
    ```
 
    > `DATABASE_URL` 由 Railway PostgreSQL 自動提供，不需手動設定。
+   > `IMGUR_CLIENT_ID` 用於圖片生成功能，前往 [Imgur API](https://api.imgur.com/oauth2/addclient) 免費註冊取得。
 
 6. Railway 會自動偵測 Python + Procfile 並部署
 7. 部署完成後，在 **Settings → Networking** 取得你的公開網址，例如：  
@@ -129,6 +133,26 @@
 小助理 美金匯率
 小助理 100美金多少台幣
 ```
+
+### 早安圖 / 圖片生成
+
+```
+小助理 早安圖
+小助理 幫我畫一隻在月球上的貓
+小助理 生成一張日本風景圖
+```
+
+> 💡 只有明確要求時才會產圖，不會自動生成。
+
+### 旅遊規劃
+
+```
+小助理 幫我規劃花蓮三天兩夜
+小助理 7/10出發去台南玩兩天
+小助理 規劃墾丁三天，想玩水上活動
+```
+
+> 💡 規劃完成後會自動將每天行程存入行程表，方便後續查詢和推播提醒。
 
 ### 其他
 
@@ -212,7 +236,8 @@ ngrok http 8000
 line-bot/
 ├── app.py                # 主程式：LINE webhook + 訊息處理 + 動作路由
 ├── database.py           # PostgreSQL 資料庫（行程／待辦／購物清單／生日）
-├── gemini_handler.py     # Gemini API 意圖解析（20 種 action）
+├── gemini_handler.py     # Gemini API 意圖解析（22 種 action）+ 旅遊規劃
+├── image_handler.py      # Gemini 圖片生成 + Imgur 上傳
 ├── weather_handler.py    # 中央氣象署天氣預報
 ├── exchange_handler.py   # 匯率查詢（ExchangeRate-API）
 ├── scheduler.py          # APScheduler 排程（每日推播／週期行程／行程歸檔）
@@ -228,6 +253,8 @@ line-bot/
 - **Flask** + **gunicorn**（Python 3.13）
 - **LINE Messaging API v3 SDK**
 - **Google Gemini API**（gemini-2.5-flash）— 自然語言意圖解析
+- **Google Gemini 2.0 Flash**（Experimental）— AI 圖片生成
+- **Imgur API** — 圖片匿名上傳（免費）
 - **PostgreSQL**（Railway 提供）
 - **APScheduler** — 每日推播、週期行程產生、行程歸檔
 - **lunardate** — 農曆日期轉換
@@ -245,6 +272,7 @@ line-bot/
 | Railway | 免費方案提供每月 $5 USD 額度，此 Bot 通常用不到 $1 |
 | 中央氣象署 API | 免費 |
 | ExchangeRate-API | 免費 |
+| Imgur API | 免費（匿名上傳，無需帳號登入） |
 
 > 💡 **推播額度說明**：向一個群組推一次算 1 則，與群組人數無關。1 個群組每日推播 = 每月約 30 則，200 則額度最多可支援 6 個群組。
 

@@ -93,8 +93,26 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
 19. **delete_birthday** — 刪除生日
     - 「刪除媽媽的生日」→ {"action": "delete_birthday", "data": {"name": "媽媽"}}
 
-20. **chat** — 一般閒聊或無法歸類
+20. **generate_image** — 生成圖片（早安圖等）
+    - 「早安圖」「來張早安圖」「生成早安圖」→ {"action": "generate_image", "data": {"type": "morning"}}
+    - 「幫我畫一張...」「生成一張...」→ {"action": "generate_image", "data": {"type": "custom", "prompt": "使用者描述的圖片內容"}}
+    注意：只有使用者明確要求生成圖片、畫圖、早安圖時才使用此 action。不要主動生成圖片。
+
+21. **plan_trip** — 旅遊行程規劃（規劃完直接存入行程表）
+    - 「幫我規劃三天兩夜花蓮行程，7/10出發」→ {"action": "plan_trip", "data": {"destination": "花蓮", "start_date": "2026-07-10", "days": 3, "preferences": ""}}
+    - 「規劃東京五天自由行，8月1號到5號，想去迪士尼」→ {"action": "plan_trip", "data": {"destination": "東京", "start_date": "2026-08-01", "days": 5, "preferences": "想去迪士尼"}}
+    - 「台南兩天一夜美食之旅，下週六出發」→ {"action": "plan_trip", "data": {"destination": "台南", "start_date": "2026-06-28", "days": 2, "preferences": "美食"}}
+    注意：start_date 必須是 YYYY-MM-DD 格式。如果使用者沒有指定出發日期，start_date 留空字串 ""。
+    preferences 放使用者提到的偏好（美食、親子、文青、購物等），沒有就留空字串。
+
+22. **chat** — 一般閒聊或無法歸類
     回傳：{"action": "chat", "reply": "你的回覆內容"}
+
+## 旅遊規劃 vs 一般聊天的判斷規則
+
+- 使用者說「規劃行程」「安排旅遊」「幫我排行程」→ **plan_trip**
+- 使用者只是問「台南有什麼好吃的」「東京推薦景點」→ **chat**（用知識直接回答）
+- 關鍵差異：plan_trip 是要「產出多天行程並存入行程表」，chat 是單純問答
 
 ## 購物清單 vs 待辦事項的判斷規則
 
@@ -136,6 +154,52 @@ class GeminiHandler:
             )
         else:
             self.model = None
+
+    def plan_trip(self, destination: str, start_date: str, days: int,
+                  preferences: str) -> list | None:
+        """讓 Gemini 規劃旅遊行程，回傳每天行程清單"""
+        if not self.model:
+            return None
+
+        pref_str = f"\n偏好：{preferences}" if preferences else ""
+
+        prompt = f"""請幫我規劃一趟 {destination} {days} 天的旅遊行程。
+出發日期：{start_date}{pref_str}
+
+請回傳一個 JSON 陣列，每個元素代表一天的行程，格式如下：
+[
+  {{
+    "date": "2026-07-10",
+    "title": "花蓮第一天：太魯閣國家公園",
+    "activities": [
+      {{"time": "09:00", "activity": "太魯閣遊客中心"}},
+      {{"time": "12:00", "activity": "午餐：原住民風味餐"}},
+      {{"time": "14:00", "activity": "砂卡礑步道"}},
+      {{"time": "18:00", "activity": "晚餐：花蓮市區美食"}}
+    ]
+  }}
+]
+
+規則：
+- 每天 3-5 個活動，包含用餐
+- title 格式為「目的地第N天：當日主題」
+- time 格式為 HH:MM
+- 只回傳 JSON 陣列，不要有其他文字
+- 推薦當地特色景點和美食
+- 行程要合理，考慮交通時間"""
+
+        try:
+            response = self.model.generate_content(prompt)
+            text = response.text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1]
+            if text.endswith("```"):
+                text = text.rsplit("```", 1)[0]
+            text = text.strip()
+            return json.loads(text)
+        except Exception as e:
+            print(f"[Gemini Trip Error] {e}")
+            return None
 
     def parse_intent(self, user_msg: str, context: str) -> dict | None:
         """解析使用者意圖，回傳結構化 dict，失敗回傳 None"""
