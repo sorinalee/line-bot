@@ -92,6 +92,8 @@ def handle_message(event):
         result = handle_debug(group_id)
     elif user_msg in ["早安", "早安圖", "早安圖片", "早安貼圖", "來張早安圖"]:
         result = handle_generate_image({"type": "morning"})
+    elif user_msg == "test image models":
+        result = test_image_models()
     else:
         result = process_with_gemini(user_msg, group_id, user_id)
 
@@ -629,6 +631,48 @@ def handle_plan_trip(data: dict, group_id: str, user_id: str) -> str:
     lines.append("💡 輸入「小助理 這週行程」即可查看")
 
     return "\n".join(lines)
+
+
+# ── 測試圖片模型（暫時）─────────────────────────────────
+def test_image_models() -> str:
+    try:
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=GEMINI_API_KEY)
+
+        image_models = []
+        for m in client.models.list():
+            if "image" in m.name.lower():
+                image_models.append(m.name)
+
+        lines = ["🔍 測試圖片模型額度：", ""]
+        test_prompt = "A simple red circle on white background"
+
+        for model_name in image_models:
+            short = model_name.replace("models/", "")
+            try:
+                resp = client.models.generate_content(
+                    model=short,
+                    contents=test_prompt,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["IMAGE", "TEXT"],
+                    ),
+                )
+                has_image = False
+                for part in resp.candidates[0].content.parts:
+                    if part.inline_data and part.inline_data.data:
+                        has_image = True
+                if has_image:
+                    lines.append(f"✅ {short} — 可用！")
+                else:
+                    lines.append(f"⚠️ {short} — 無圖片回傳")
+            except Exception as e:
+                err = str(e)[:80]
+                lines.append(f"❌ {short} — {err}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"測試失敗：{e}"
 
 
 # ── Debug ──────────────────────────────────────────────
