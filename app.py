@@ -85,11 +85,13 @@ def handle_message(event):
             user_msg = user_msg[len(t):].strip()
             break
 
-    # 處理特殊指令
+    # 處理特殊指令（關鍵字直接攔截，不經 Gemini）
     if user_msg in ["幫助", "help", "指令", "?"]:
         result = get_help_text()
     elif user_msg in ["debug", "偵錯", "檢查資料"]:
         result = handle_debug(group_id)
+    elif user_msg in ["早安", "早安圖", "早安圖片", "早安貼圖", "來張早安圖"]:
+        result = handle_generate_image({"type": "morning"})
     else:
         result = process_with_gemini(user_msg, group_id, user_id)
 

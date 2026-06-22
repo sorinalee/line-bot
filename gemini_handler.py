@@ -239,5 +239,5 @@ class GeminiHandler:
         except json.JSONDecodeError:
             return {"action": "chat", "reply": text if text else "我沒聽懂，可以再說一次嗎？"}
         except Exception as e:
-            print(f"[Gemini Error] {e}")
-            return None
+            print(f"[Gemini Error] type={type(e).__name__} msg={e}")
+            return {"action": "chat", "reply": f"AI 暫時無法回應，請稍後再試（{type(e).__name__}）"}
