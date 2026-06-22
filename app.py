@@ -455,27 +455,46 @@ def handle_clear_shopping(group_id: str) -> str:
 
 # ── 生日 ──────────────────────────────────────────────
 def handle_add_birthday(data: dict, group_id: str) -> str:
-    name = data.get("name", "")
-    month = data.get("month", 0)
-    day = data.get("day", 0)
-    year = data.get("year")
-    is_lunar = data.get("is_lunar", False)
+    items = data.get("items", [])
 
-    if not name or not month or not day:
+    # 向下相容：如果 Gemini 回傳舊格式（單筆），轉成 items
+    if not items and data.get("name"):
+        items = [{"name": data["name"], "month": data.get("month", 0),
+                  "day": data.get("day", 0), "year": data.get("year"),
+                  "is_lunar": data.get("is_lunar", False)}]
+
+    if not items:
         return "請告訴我姓名和生日，例如「媽媽生日是3月15號」或「阿嬤農曆九月初三生日」"
 
-    db.add_birthday(group_id, name, month, day, year, is_lunar=is_lunar)
+    results = []
+    for item in items:
+        name = item.get("name", "")
+        month = item.get("month", 0)
+        day = item.get("day", 0)
+        year = item.get("year")
+        is_lunar = item.get("is_lunar", False)
 
-    cal_type = "農曆" if is_lunar else ""
-    date_str = f"{cal_type}{month}/{day}"
-    year_str = f"（{year} 年生）" if year else ""
+        if not name or not month or not day:
+            continue
 
-    reply = f"🎂 已記住 {name} 的生日：{date_str}{year_str}"
-    if is_lunar:
-        solar = db._lunar_to_solar(month, day, now_tw().year)
-        if solar:
-            reply += f"\n📅 今年國曆對應：{solar.month}/{solar.day}"
-    return reply
+        db.add_birthday(group_id, name, month, day, year, is_lunar=is_lunar)
+
+        cal_type = "農曆" if is_lunar else ""
+        date_str = f"{cal_type}{month}/{day}"
+        year_str = f"（{year} 年生）" if year else ""
+        line = f"  🎂 {name}：{date_str}{year_str}"
+
+        if is_lunar:
+            solar = db._lunar_to_solar(month, day, now_tw().year)
+            if solar:
+                line += f" → 今年國曆 {solar.month}/{solar.day}"
+
+        results.append(line)
+
+    if not results:
+        return "請告訴我姓名和生日，例如「媽媽3月15號、爸爸8月20號」"
+
+    return f"✅ 已記住 {len(results)} 位生日：\n" + "\n".join(results)
 
 
 def handle_query_birthdays(group_id: str) -> str:
