@@ -16,7 +16,6 @@
 | **生日提醒** | 支援國曆與農曆，批次輸入，每日自動提醒壽星與近期生日 |
 | **天氣查詢** | 中央氣象署 36 小時天氣預報，支援全台各縣市 |
 | **匯率查詢** | 18 種常用幣別即時匯率，支援金額換算 |
-| **早安圖／圖片生成** | Gemini AI 生成早安圖或自訂圖片，每日隨機主題風格，明確呼叫才會產圖 |
 | **旅遊行程規劃** | AI 規劃多天旅遊行程，自動存入行程表，支援偏好設定 |
 | **每日推播** | 每天早上 7:30 自動推播當日行程＋天氣＋生日＋待辦＋購物摘要 |
 | **自然語言** | 不用記指令，像跟人說話一樣 |
@@ -132,16 +131,6 @@
 小助理 100美金多少台幣
 ```
 
-### 早安圖 / 圖片生成
-
-```
-小助理 早安圖
-小助理 幫我畫一隻在月球上的貓
-小助理 生成一張日本風景圖
-```
-
-> 💡 只有明確要求時才會產圖，不會自動生成。
-
 ### 旅遊規劃
 
 ```
@@ -234,8 +223,7 @@ ngrok http 8000
 line-bot/
 ├── app.py                # 主程式：LINE webhook + 訊息處理 + 動作路由
 ├── database.py           # PostgreSQL 資料庫（行程／待辦／購物清單／生日）
-├── gemini_handler.py     # Gemini API 意圖解析（22 種 action）+ 旅遊規劃
-├── image_handler.py      # Gemini 圖片生成 + Catbox 上傳
+├── gemini_handler.py     # Gemini API 意圖解析（21 種 action）+ 旅遊規劃
 ├── weather_handler.py    # 中央氣象署天氣預報
 ├── exchange_handler.py   # 匯率查詢（ExchangeRate-API）
 ├── scheduler.py          # APScheduler 排程（每日推播／週期行程／行程歸檔）
@@ -251,8 +239,6 @@ line-bot/
 - **Flask** + **gunicorn**（Python 3.13）
 - **LINE Messaging API v3 SDK**
 - **Google Gemini API**（gemini-2.5-flash）— 自然語言意圖解析
-- **Pollinations.ai** — AI 圖片生成（免費、免 API Key）
-- **Catbox.moe** — 圖片匿名上傳（免費、免 API Key）
 - **PostgreSQL**（Railway 提供）
 - **APScheduler** — 每日推播、週期行程產生、行程歸檔
 - **lunardate** — 農曆日期轉換
@@ -270,7 +256,6 @@ line-bot/
 | Railway | 免費方案提供每月 $5 USD 額度，此 Bot 通常用不到 $1 |
 | 中央氣象署 API | 免費 |
 | ExchangeRate-API | 免費 |
-| Catbox.moe | 免費（匿名上傳，無需帳號或 API Key） |
 
 > 💡 **推播額度說明**：向一個群組推一次算 1 則，與群組人數無關。1 個群組每日推播 = 每月約 30 則，200 則額度最多可支援 6 個群組。
 

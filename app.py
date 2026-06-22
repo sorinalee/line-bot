@@ -17,7 +17,6 @@ from linebot.v3.messaging import (
     MessagingApi,
     ReplyMessageRequest,
     TextMessage,
-    ImageMessage,
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from linebot.v3.exceptions import InvalidSignatureError
@@ -26,7 +25,6 @@ from database import Database
 from gemini_handler import GeminiHandler
 from weather_handler import get_weather
 from exchange_handler import get_exchange_rate
-from image_handler import generate_morning_image, generate_custom_image
 from scheduler import start_scheduler
 
 # ── 時區設定 ─────────────────────────────────────────────
@@ -90,39 +88,19 @@ def handle_message(event):
         result = get_help_text()
     elif user_msg in ["debug", "偵錯", "檢查資料"]:
         result = handle_debug(group_id)
-    elif user_msg in ["早安", "早安圖", "早安圖片", "早安貼圖", "來張早安圖"]:
-        result = handle_generate_image({"type": "morning"})
-    elif user_msg == "test image models":
-        result = test_image_models()
     else:
         result = process_with_gemini(user_msg, group_id, user_id)
 
-    # 回覆（支援文字或圖片+文字）
+    # 回覆
     with ApiClient(configuration) as api_client:
         messaging_api = MessagingApi(api_client)
-        if isinstance(result, dict) and result.get("image_url"):
-            messages = [
-                ImageMessage(
-                    original_content_url=result["image_url"],
-                    preview_image_url=result["image_url"],
-                ),
-            ]
-            if result.get("text"):
-                messages.append(TextMessage(text=result["text"]))
-            messaging_api.reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=messages,
-                )
+        reply = result if isinstance(result, str) else str(result)
+        messaging_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=reply)],
             )
-        else:
-            reply = result if isinstance(result, str) else str(result)
-            messaging_api.reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=[TextMessage(text=reply)],
-                )
-            )
+        )
 
 
 # ── Gemini 意圖解析 + 執行 ──────────────────────────────
@@ -195,8 +173,6 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str) -> str:
             return handle_query_birthdays(group_id)
         elif action == "delete_birthday":
             return handle_delete_birthday(data, group_id)
-        elif action == "generate_image":
-            return handle_generate_image(data)
         elif action == "plan_trip":
             return handle_plan_trip(data, group_id, user_id)
         elif action == "summary":
@@ -565,28 +541,6 @@ def handle_delete_birthday(data: dict, group_id: str) -> str:
     return f"找不到「{name}」的生日紀錄"
 
 
-# ── 圖片生成 ──────────────────────────────────────────
-def handle_generate_image(data: dict):
-    img_type = data.get("type", "morning")
-
-    if img_type == "morning":
-        result = generate_morning_image()
-    else:
-        prompt = data.get("prompt", "")
-        if not prompt:
-            return "請告訴我想生成什麼圖片，例如「幫我畫一隻貓」"
-        result = generate_custom_image(prompt)
-
-    if result.get("error"):
-        return f"⚠️ {result['error']}"
-
-    text = f"🎨 今日主題：{result.get('theme', '自訂')}" if result.get("theme") else ""
-    if result.get("text"):
-        text = f"{text}\n{result['text']}" if text else result["text"]
-
-    return {"image_url": result["url"], "text": text or None}
-
-
 # ── 旅遊規劃 ──────────────────────────────────────────
 def handle_plan_trip(data: dict, group_id: str, user_id: str) -> str:
     destination = data.get("destination", "")
@@ -631,48 +585,6 @@ def handle_plan_trip(data: dict, group_id: str, user_id: str) -> str:
     lines.append("💡 輸入「小助理 這週行程」即可查看")
 
     return "\n".join(lines)
-
-
-# ── 測試圖片模型（暫時）─────────────────────────────────
-def test_image_models() -> str:
-    try:
-        from google import genai
-        from google.genai import types
-        client = genai.Client(api_key=GEMINI_API_KEY)
-
-        image_models = []
-        for m in client.models.list():
-            if "image" in m.name.lower():
-                image_models.append(m.name)
-
-        lines = ["🔍 測試圖片模型額度：", ""]
-        test_prompt = "A simple red circle on white background"
-
-        for model_name in image_models:
-            short = model_name.replace("models/", "")
-            try:
-                resp = client.models.generate_content(
-                    model=short,
-                    contents=test_prompt,
-                    config=types.GenerateContentConfig(
-                        response_modalities=["IMAGE", "TEXT"],
-                    ),
-                )
-                has_image = False
-                for part in resp.candidates[0].content.parts:
-                    if part.inline_data and part.inline_data.data:
-                        has_image = True
-                if has_image:
-                    lines.append(f"✅ {short} — 可用！")
-                else:
-                    lines.append(f"⚠️ {short} — 無圖片回傳")
-            except Exception as e:
-                err = str(e)[:80]
-                lines.append(f"❌ {short} — {err}")
-
-        return "\n".join(lines)
-    except Exception as e:
-        return f"測試失敗：{e}"
 
 
 # ── Debug ──────────────────────────────────────────────
@@ -757,10 +669,6 @@ def get_help_text() -> str:
 • 小助理 100美金多少台幣
 • 小助理 日幣匯率
 
-【早安圖／圖片生成】
-• 小助理 早安圖
-• 小助理 幫我畫一隻在月球上的貓
-
 【旅遊規劃】
 • 小助理 幫我規劃花蓮三天兩夜
 • 小助理 7/10出發去台南玩兩天
@@ -771,8 +679,7 @@ def get_help_text() -> str:
 • 小助理 幫助
 
 💡 用自然的方式說就好，我會自己理解！
-⏰ 每天早上 7:30 會自動推播今日行程和天氣
-🎨 圖片生成需明確要求才會產圖"""
+⏰ 每天早上 7:30 會自動推播今日行程和天氣"""
 
 
 # ── 啟動排程 ───────────────────────────────────────────
