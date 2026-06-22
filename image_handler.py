@@ -35,7 +35,7 @@ def _generate_image(prompt: str) -> tuple[bytes | None, str]:
     """呼叫 Gemini 生成圖片，回傳 (image_bytes, text_content)"""
     client = _get_client()
     response = client.models.generate_content(
-        model="gemini-2.0-flash-exp",
+        model="gemini-2.0-flash-preview-image-generation",
         contents=prompt,
         config=types.GenerateContentConfig(
             response_modalities=["IMAGE", "TEXT"],
