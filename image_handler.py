@@ -1,7 +1,7 @@
 """
-Gemini 圖片生成模組 — 早安圖等圖片生成功能
-使用 google-genai SDK + Gemini 2.0 Flash 的原生圖片生成能力
-圖片透過 Catbox.moe 匿名上傳取得公開 URL 供 LINE 傳送（免費、免 API Key）
+圖片生成模組 — 早安圖等圖片生成功能
+使用 google-genai SDK + Imagen 3 (免費版) 生成圖片
+圖片透過 Catbox.moe 匿名上傳取得公開 URL 供 LINE 傳送
 """
 
 import os
@@ -13,17 +13,20 @@ from google.genai import types
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
-MORNING_THEMES = [
-    "中國風山水畫",
-    "可愛小動物",
-    "現代都會風格",
-    "美麗自然景色",
-    "日式和風插畫",
-    "歐洲花園風格",
-    "熱帶海灘風景",
-    "溫馨家庭插畫",
-    "水彩花卉風格",
-    "童趣卡通風格",
+# Imagen 模型名稱（免費版 Nano Banana）
+IMAGEN_MODEL = "imagen-3.0-generate-001"
+
+MORNING_THEMES_EN = [
+    ("Chinese ink wash painting", "中國風山水畫"),
+    ("cute animals illustration", "可愛小動物"),
+    ("modern city lifestyle", "現代都會風格"),
+    ("beautiful natural scenery", "美麗自然景色"),
+    ("Japanese style illustration", "日式和風插畫"),
+    ("European garden scene", "歐洲花園風格"),
+    ("tropical beach scenery", "熱帶海灘風景"),
+    ("warm family illustration", "溫馨家庭插畫"),
+    ("watercolor floral art", "水彩花卉風格"),
+    ("cute cartoon style", "童趣卡通風格"),
 ]
 
 
@@ -31,27 +34,20 @@ def _get_client():
     return genai.Client(api_key=GEMINI_API_KEY)
 
 
-def _generate_image(prompt: str) -> tuple[bytes | None, str]:
-    """呼叫 Gemini 生成圖片，回傳 (image_bytes, text_content)"""
+def _generate_with_imagen(prompt: str) -> bytes | None:
+    """呼叫 Imagen 3 生成圖片，回傳 image_bytes"""
     client = _get_client()
-    response = client.models.generate_content(
-        model="gemini-2.0-flash-preview-image-generation",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_modalities=["IMAGE", "TEXT"],
+    response = client.models.generate_images(
+        model=IMAGEN_MODEL,
+        prompt=prompt,
+        config=types.GenerateImagesConfig(
+            number_of_images=1,
         ),
     )
 
-    image_data = None
-    text_content = ""
-
-    for part in response.candidates[0].content.parts:
-        if part.inline_data and part.inline_data.data:
-            image_data = part.inline_data.data
-        elif part.text:
-            text_content = part.text.strip()
-
-    return image_data, text_content
+    if response.generated_images:
+        return response.generated_images[0].image.image_bytes
+    return None
 
 
 def generate_morning_image() -> dict:
@@ -59,34 +55,29 @@ def generate_morning_image() -> dict:
     if not GEMINI_API_KEY:
         return {"error": "Gemini API 尚未設定"}
 
-    theme = random.choice(MORNING_THEMES)
+    theme_en, theme_zh = random.choice(MORNING_THEMES_EN)
 
-    prompt = f"""請生成一張早安圖片。
-
-主題風格：{theme}
-
-要求：
-- 圖片中要有明顯的「早安」中文字樣
-- 搭配一句簡短的正向短語（也顯示在圖片上）
-- 畫面明亮、溫馨
-- 文字需與背景對比清晰、容易閱讀
-- 使用正向且充滿希望的視覺元素
-- 圖片比例 1:1
-- 高品質插圖風格
-
-請生成圖片。"""
+    prompt = (
+        f"A bright, warm, and hopeful 'Good Morning' greeting card illustration. "
+        f"Style: {theme_en}. "
+        f"The image should feature the large Chinese characters '早安' (Good Morning) "
+        f"prominently displayed with clear contrast against the background. "
+        f"Include a short positive phrase in Chinese below it. "
+        f"The overall mood should be uplifting, colorful, and full of positive energy. "
+        f"Square format, high quality illustration."
+    )
 
     try:
-        image_data, text_content = _generate_image(prompt)
+        image_data = _generate_with_imagen(prompt)
 
         if not image_data:
-            return {"error": "Gemini 未能生成圖片，請稍後再試"}
+            return {"error": "未能生成圖片，請稍後再試"}
 
         img_url = _upload_to_catbox(image_data)
         if not img_url:
             return {"error": "圖片上傳失敗，請稍後再試"}
 
-        return {"url": img_url, "text": text_content, "theme": theme}
+        return {"url": img_url, "text": f"☀️ 今日主題：{theme_zh}", "theme": theme_zh}
 
     except Exception as e:
         print(f"[Image Error] {e}")
@@ -99,16 +90,16 @@ def generate_custom_image(prompt: str) -> dict:
         return {"error": "Gemini API 尚未設定"}
 
     try:
-        image_data, text_content = _generate_image(prompt)
+        image_data = _generate_with_imagen(prompt)
 
         if not image_data:
-            return {"error": "Gemini 未能生成圖片，請稍後再試"}
+            return {"error": "未能生成圖片，請稍後再試"}
 
         img_url = _upload_to_catbox(image_data)
         if not img_url:
             return {"error": "圖片上傳失敗，請稍後再試"}
 
-        return {"url": img_url, "text": text_content}
+        return {"url": img_url, "text": ""}
 
     except Exception as e:
         print(f"[Image Error] {e}")
@@ -126,7 +117,7 @@ def _upload_to_catbox(image_bytes: bytes) -> str | None:
             "https://catbox.moe/user/api.php",
             files=files,
             data=data,
-            timeout=30,
+            timeout=60,
         )
         if resp.status_code == 200 and resp.text.startswith("https://"):
             return resp.text.strip()
