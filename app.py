@@ -90,8 +90,6 @@ def handle_message(event):
         result = get_help_text()
     elif user_msg in ["debug", "偵錯", "檢查資料"]:
         result = handle_debug(group_id)
-    elif user_msg == "list models":
-        result = list_image_models()
     elif user_msg in ["早安", "早安圖", "早安圖片", "早安貼圖", "來張早安圖"]:
         result = handle_generate_image({"type": "morning"})
     else:
@@ -631,28 +629,6 @@ def handle_plan_trip(data: dict, group_id: str, user_id: str) -> str:
     lines.append("💡 輸入「小助理 這週行程」即可查看")
 
     return "\n".join(lines)
-
-
-# ── 列出可用模型（暫時用，查完可移除）────────────────────
-def list_image_models() -> str:
-    try:
-        from google import genai
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        lines = ["🔍 可用的圖片相關模型：", ""]
-        for m in client.models.list():
-            name = m.name.lower()
-            if any(kw in name for kw in ["image", "imagen", "banana"]):
-                methods = ", ".join(m.supported_actions) if hasattr(m, "supported_actions") and m.supported_actions else "N/A"
-                lines.append(f"• {m.name}")
-        if len(lines) == 2:
-            lines.append("（未找到圖片相關模型）")
-            lines.append("")
-            lines.append("所有模型：")
-            for m in client.models.list():
-                lines.append(f"• {m.name}")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"列舉模型失敗：{e}"
 
 
 # ── Debug ──────────────────────────────────────────────

@@ -14,7 +14,7 @@ from google.genai import types
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 # Imagen 模型名稱（免費版 Nano Banana）
-IMAGEN_MODEL = "imagen-3.0-generate-001"
+IMAGEN_MODEL = "imagen-4.0-fast-generate-001"
 
 MORNING_THEMES_EN = [
     ("Chinese ink wash painting", "中國風山水畫"),
