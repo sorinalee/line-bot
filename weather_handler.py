@@ -103,4 +103,4 @@ def get_weather(location: str = "") -> str:
 
     except Exception as e:
         print(f"[Weather Error] {e}")
-        return "抱歉，天氣資料暫時無法取得，請稍後再試。"
+        return f"抱歉，天氣資料暫時無法取得：{e}"
