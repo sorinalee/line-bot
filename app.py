@@ -24,6 +24,8 @@ from linebot.v3.exceptions import InvalidSignatureError
 from database import Database
 from gemini_handler import GeminiHandler
 from weather_handler import get_weather
+from exchange_handler import get_exchange_rate
+from scheduler import start_scheduler
 
 # ── 時區設定 ─────────────────────────────────────────────
 TW = timezone(timedelta(hours=8))
@@ -109,6 +111,7 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str) -> str:
     # 取得現有資料作為上下文
     upcoming_events = db.get_upcoming_events(group_id, days=7)
     pending_todos = db.get_todos(group_id, status="pending")
+    shopping = db.get_shopping_list(group_id, status="pending")
 
     context = f"""現在時間：{today}
 
@@ -116,7 +119,10 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str) -> str:
 {format_events_for_context(upcoming_events)}
 
 【待辦事項】
-{format_todos_for_context(pending_todos)}"""
+{format_todos_for_context(pending_todos)}
+
+【購物清單】
+{format_shopping_for_context(shopping)}"""
 
     intent_json = gemini.parse_intent(user_msg, context)
 
@@ -146,6 +152,20 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str) -> str:
         elif action == "query_weather":
             location = data.get("location", "")
             return get_weather(location)
+        elif action == "add_shopping":
+            return handle_add_shopping(data, group_id, user_id)
+        elif action == "complete_shopping":
+            return handle_complete_shopping(data, group_id)
+        elif action == "query_shopping":
+            return handle_query_shopping(group_id)
+        elif action == "delete_shopping":
+            return handle_delete_shopping(data, group_id)
+        elif action == "clear_shopping":
+            return handle_clear_shopping(group_id)
+        elif action == "query_exchange":
+            currency = data.get("currency", "")
+            amount = data.get("amount", 0)
+            return get_exchange_rate(currency, amount)
         elif action == "summary":
             return handle_summary(group_id)
         elif action == "chat":
@@ -218,18 +238,23 @@ def handle_add_event(data: dict, group_id: str, user_id: str) -> str:
     title = data.get("title", "未命名行程")
     date_str = data.get("date", "")
     time_str = data.get("time", "")
+    recurrence = data.get("recurrence", "")
 
     if not date_str:
         return "請告訴我行程的日期，例如「7/5 下午三點 看牙醫」"
 
     normalized = normalize_date(date_str)
     if normalized is None:
-        normalized = date_str  # 無法解析就照原樣存，但記錄警告
+        normalized = date_str
         print(f"[WARNING] 無法正規化日期：'{date_str}'，照原樣存入")
 
     dt_str = f"{normalized} {time_str}".strip()
-    db.add_event(group_id, user_id, title, dt_str)
-    return f"✅ 已新增行程：\n📅 {dt_str}\n📌 {title}"
+    db.add_event(group_id, user_id, title, dt_str, recurrence=recurrence)
+
+    reply = f"✅ 已新增行程：\n📅 {dt_str}\n📌 {title}"
+    if recurrence:
+        reply += f"\n🔁 {recurrence}"
+    return reply
 
 
 def handle_query_events(data: dict, group_id: str) -> str:
@@ -331,26 +356,95 @@ def handle_delete_todo(data: dict, group_id: str) -> str:
 def handle_summary(group_id: str) -> str:
     events = db.get_upcoming_events(group_id, days=3)
     todos = db.get_todos(group_id, status="pending")
+    shopping = db.get_shopping_list(group_id, status="pending")
 
     lines = ["📊 目前狀態總覽", ""]
 
     if events:
         lines.append("【近三天行程】")
         for e in events:
-            lines.append(f"  📅 {e['datetime']}  {e['title']}")
+            recur = f" 🔁" if e.get("recurrence") else ""
+            lines.append(f"  📅 {e['datetime']}  {e['title']}{recur}")
         lines.append("")
 
     if todos:
         lines.append(f"【待辦事項】（{len(todos)} 項）")
         for t in todos:
             lines.append(f"  ☐ {t['title']}")
+        lines.append("")
     else:
         lines.append("【待辦事項】全部完成！🎉")
+        lines.append("")
 
-    if not events and not todos:
-        return "目前沒有行程也沒有待辦，一切清爽！✨"
+    if shopping:
+        lines.append(f"【購物清單】（{len(shopping)} 項）")
+        for s in shopping:
+            lines.append(f"  🛒 {s['item']}")
+    else:
+        lines.append("【購物清單】沒有待買項目")
+
+    if not events and not todos and not shopping:
+        return "目前沒有行程、待辦、購物清單，一切清爽！✨"
 
     return "\n".join(lines)
+
+
+# ── 購物清單 ───────────────────────────────────────────
+def handle_add_shopping(data: dict, group_id: str, user_id: str) -> str:
+    items = data.get("items", [])
+    if not items:
+        item = data.get("item", "")
+        if item:
+            items = [item]
+        else:
+            return "請告訴我要買什麼，例如「要買牛奶、雞蛋」"
+
+    results = []
+    for item in items:
+        db.add_shopping_item(group_id, user_id, item)
+        results.append(f"  🛒 {item}")
+
+    return "✅ 已加入購物清單：\n" + "\n".join(results)
+
+
+def handle_complete_shopping(data: dict, group_id: str) -> str:
+    keyword = data.get("keyword", "")
+    if not keyword:
+        return "請告訴我買了什麼，例如「牛奶買了」"
+
+    completed = db.complete_shopping_item(group_id, keyword)
+    if completed:
+        return f"✅ 已購買：{completed['item']}"
+    return f"購物清單中找不到「{keyword}」"
+
+
+def handle_query_shopping(group_id: str) -> str:
+    pending = db.get_shopping_list(group_id, status="pending")
+    if not pending:
+        return "購物清單是空的，不需要買東西 🎉"
+
+    lines = ["🛒 購物清單：", ""]
+    for i, s in enumerate(pending, 1):
+        lines.append(f"  {i}. ☐ {s['item']}")
+    return "\n".join(lines)
+
+
+def handle_delete_shopping(data: dict, group_id: str) -> str:
+    keyword = data.get("keyword", "")
+    if not keyword:
+        return "請告訴我要刪除哪個購物項目"
+
+    deleted = db.delete_shopping_item(group_id, keyword)
+    if deleted:
+        return f"🗑️ 已從購物清單移除：{deleted['item']}"
+    return f"購物清單中找不到「{keyword}」"
+
+
+def handle_clear_shopping(group_id: str) -> str:
+    count = db.clear_bought_items(group_id)
+    if count > 0:
+        return f"🗑️ 已清除 {count} 個已購買項目"
+    return "沒有已購買的項目需要清除"
 
 
 # ── Debug ──────────────────────────────────────────────
@@ -394,6 +488,12 @@ def format_todos_for_context(todos: list) -> str:
     return "\n".join(f"- {t['title']}" for t in todos)
 
 
+def format_shopping_for_context(shopping: list) -> str:
+    if not shopping:
+        return "（無）"
+    return "\n".join(f"- {s['item']}" for s in shopping)
+
+
 def get_help_text() -> str:
     return """🤖 家庭助理使用說明
 
@@ -401,22 +501,38 @@ def get_help_text() -> str:
 
 【行程管理】
 • 小助理 下週三下午兩點看牙醫
+• 小助理 每週三晚上八點倒垃圾（週期行程）
+• 小助理 每月5號繳房租（每月重複）
 • 小助理 這週有什麼行程？
 • 小助理 取消看牙醫
 
 【待辦事項】
+• 小助理 待辦：繳電話費、寄包裹
+• 小助理 電話費繳了
+• 小助理 待辦清單
+
+【購物清單】
 • 小助理 要買牛奶、雞蛋、衛生紙
 • 小助理 牛奶買了
-• 小助理 待辦清單
-• 小助理 刪掉衛生紙
+• 小助理 購物清單
+• 小助理 不用買衛生紙了
+
+【匯率查詢】
+• 小助理 美金匯率
+• 小助理 100美金多少台幣
+• 小助理 日幣匯率
 
 【其他】
-• 小助理 目前狀態
+• 小助理 天氣（查詢天氣預報）
+• 小助理 目前狀態（總覽）
 • 小助理 幫助
-• 小助理 debug（查看資料庫原始資料）
 
-💡 用自然的方式說就好，我會自己理解！"""
+💡 用自然的方式說就好，我會自己理解！
+⏰ 每天早上 7:30 會自動推播今日行程和天氣"""
 
+
+# ── 啟動排程 ───────────────────────────────────────────
+start_scheduler(app)
 
 # ── 啟動 ────────────────────────────────────────────────
 if __name__ == "__main__":
