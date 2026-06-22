@@ -149,18 +149,19 @@ class Database:
             )
             return [dict(r) for r in cur.fetchall()]
 
-    def delete_event_by_keyword(self, group_id: str, keyword: str) -> dict | None:
+    def delete_event_by_keyword(self, group_id: str, keyword: str) -> list:
+        """刪除所有匹配關鍵字的未歸檔行程，回傳被刪除的行程列表"""
         with self._get_conn() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur.execute(
-                "SELECT * FROM events WHERE group_id = %s AND archived = FALSE AND title LIKE %s LIMIT 1",
+                "SELECT * FROM events WHERE group_id = %s AND archived = FALSE AND title LIKE %s ORDER BY datetime",
                 (group_id, f"%{keyword}%"),
             )
-            row = cur.fetchone()
-            if row:
-                cur.execute("DELETE FROM events WHERE id = %s", (row["id"],))
-                return dict(row)
-        return None
+            rows = [dict(r) for r in cur.fetchall()]
+            if rows:
+                ids = [r["id"] for r in rows]
+                cur.execute("DELETE FROM events WHERE id = ANY(%s)", (ids,))
+            return rows
 
     def archive_old_events(self, days_old: int = 365):
         """將超過指定天數的過期行程歸檔"""

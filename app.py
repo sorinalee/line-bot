@@ -306,10 +306,16 @@ def handle_delete_event(data: dict, group_id: str) -> str:
     if not keyword:
         return "請告訴我要刪除哪個行程，例如「取消看牙醫」"
 
-    deleted = db.delete_event_by_keyword(group_id, keyword)
-    if deleted:
-        return f"🗑️ 已刪除行程：{deleted['title']}（{deleted['datetime']}）"
-    return f"找不到包含「{keyword}」的行程"
+    deleted_list = db.delete_event_by_keyword(group_id, keyword)
+    if not deleted_list:
+        return f"找不到包含「{keyword}」的行程"
+    if len(deleted_list) == 1:
+        d = deleted_list[0]
+        return f"🗑️ 已刪除行程：{d['title']}（{d['datetime']}）"
+    lines = [f"🗑️ 已刪除 {len(deleted_list)} 筆行程："]
+    for d in deleted_list:
+        lines.append(f"  • {d['title']}（{d['datetime']}）")
+    return "\n".join(lines)
 
 
 def handle_add_todo(data: dict, group_id: str, user_id: str) -> str:
