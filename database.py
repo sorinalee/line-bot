@@ -95,6 +95,16 @@ class Database:
             )
             return [dict(r) for r in cur.fetchall()]
 
+    def search_events(self, group_id: str, keyword: str) -> list:
+        """依關鍵字搜尋所有行程（含過去的）"""
+        with self._get_conn() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM events WHERE group_id = %s AND title LIKE %s ORDER BY datetime DESC",
+                (group_id, f"%{keyword}%"),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
     def delete_event_by_keyword(self, group_id: str, keyword: str) -> dict | None:
         with self._get_conn() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)

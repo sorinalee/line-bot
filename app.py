@@ -130,6 +130,8 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str) -> str:
             return handle_add_event(data, group_id, user_id)
         elif action == "query_events":
             return handle_query_events(data, group_id)
+        elif action == "search_events":
+            return handle_search_events(data, group_id)
         elif action == "delete_event":
             return handle_delete_event(data, group_id)
         elif action == "add_todo":
@@ -198,8 +200,8 @@ def normalize_date(date_str: str) -> str | None:
         except ValueError:
             pass
 
-    # 相對日期
-    relative = {"今天": 0, "明天": 1, "後天": 2, "大後天": 3}
+    # 相對日期（含過去）
+    relative = {"前天": -2, "昨天": -1, "今天": 0, "明天": 1, "後天": 2, "大後天": 3}
     if s in relative:
         dt = today + timedelta(days=relative[s])
         return dt.strftime("%Y-%m-%d")
@@ -241,6 +243,21 @@ def handle_query_events(data: dict, group_id: str) -> str:
         return f"{label}沒有行程，盡情放鬆吧 🎉"
 
     lines = [f"📅 {label}的行程：", ""]
+    for e in events:
+        lines.append(f"• {e['datetime']}  {e['title']}")
+    return "\n".join(lines)
+
+
+def handle_search_events(data: dict, group_id: str) -> str:
+    keyword = data.get("keyword", "")
+    if not keyword:
+        return "請告訴我要查什麼，例如「我哪天看過牙醫？」"
+
+    events = db.search_events(group_id, keyword)
+    if not events:
+        return f"找不到包含「{keyword}」的行程紀錄"
+
+    lines = [f"🔍 包含「{keyword}」的行程紀錄：", ""]
     for e in events:
         lines.append(f"• {e['datetime']}  {e['title']}")
     return "\n".join(lines)
