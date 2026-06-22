@@ -78,7 +78,19 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
     - 「匯率」→ {"action": "query_exchange", "data": {"currency": "", "amount": 0}}
     注意：如果沒指定幣別，currency 留空字串（會顯示常用匯率總覽）。amount 預設 0 表示只查匯率不換算。
 
-17. **chat** — 一般閒聊或無法歸類
+17. **add_birthday** — 新增生日
+    - 「媽媽生日是3月15號」→ {"action": "add_birthday", "data": {"name": "媽媽", "month": 3, "day": 15, "year": null}}
+    - 「爸爸1965年8月20日生」→ {"action": "add_birthday", "data": {"name": "爸爸", "month": 8, "day": 20, "year": 1965}}
+    注意：year 可以是 null（不知道出生年）或整數。month 和 day 必須是整數。
+
+18. **query_birthdays** — 查詢生日清單或近期生日
+    - 「生日清單」→ {"action": "query_birthdays", "data": {}}
+    - 「最近誰生日」→ {"action": "query_birthdays", "data": {}}
+
+19. **delete_birthday** — 刪除生日
+    - 「刪除媽媽的生日」→ {"action": "delete_birthday", "data": {"name": "媽媽"}}
+
+20. **chat** — 一般閒聊或無法歸類
     回傳：{"action": "chat", "reply": "你的回覆內容"}
 
 ## 購物清單 vs 待辦事項的判斷規則

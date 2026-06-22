@@ -87,6 +87,17 @@ class Database:
                     completed_at TIMESTAMPTZ
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS birthdays (
+                    id SERIAL PRIMARY KEY,
+                    group_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    month INTEGER NOT NULL,
+                    day INTEGER NOT NULL,
+                    year INTEGER,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
 
     # ── 行程 ────────────────────────────────────────────
     def add_event(self, group_id: str, user_id: str, title: str, dt_str: str,
@@ -168,7 +179,7 @@ class Database:
         """取得所有有資料的 group_id（用於排程推播）"""
         with self._get_conn() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT DISTINCT group_id FROM events UNION SELECT DISTINCT group_id FROM todos UNION SELECT DISTINCT group_id FROM shopping_list")
+            cur.execute("SELECT DISTINCT group_id FROM events UNION SELECT DISTINCT group_id FROM todos UNION SELECT DISTINCT group_id FROM shopping_list UNION SELECT DISTINCT group_id FROM birthdays")
             return [row[0] for row in cur.fetchall()]
 
     # ── 待辦 ────────────────────────────────────────────
@@ -274,3 +285,69 @@ class Database:
                 (group_id,),
             )
             return cur.rowcount
+
+    # ── 生日 ────────────────────────────────────────────
+    def add_birthday(self, group_id: str, name: str, month: int, day: int,
+                     year: int | None = None):
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO birthdays (group_id, name, month, day, year) VALUES (%s, %s, %s, %s, %s)",
+                (group_id, name, month, day, year),
+            )
+
+    def get_birthdays(self, group_id: str) -> list:
+        with self._get_conn() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM birthdays WHERE group_id = %s ORDER BY month, day",
+                (group_id,),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_todays_birthdays(self, group_id: str) -> list:
+        """取得今天生日的人"""
+        now = now_tw()
+        with self._get_conn() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM birthdays WHERE group_id = %s AND month = %s AND day = %s",
+                (group_id, now.month, now.day),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_upcoming_birthdays(self, group_id: str, days: int = 30) -> list:
+        """取得未來 N 天內的生日"""
+        now = now_tw()
+        results = []
+        all_bdays = self.get_birthdays(group_id)
+        for b in all_bdays:
+            try:
+                this_year = datetime(now.year, b["month"], b["day"], tzinfo=TW)
+            except ValueError:
+                continue
+            if this_year.date() < now.date():
+                this_year = this_year.replace(year=now.year + 1)
+            diff = (this_year.date() - now.date()).days
+            if 0 <= diff <= days:
+                b["days_until"] = diff
+                if b.get("year"):
+                    b["age"] = now.year - b["year"] + (1 if diff > 0 else 0)
+                    if this_year.year > now.year:
+                        b["age"] = this_year.year - b["year"]
+                results.append(b)
+        results.sort(key=lambda x: x["days_until"])
+        return results
+
+    def delete_birthday(self, group_id: str, name: str) -> dict | None:
+        with self._get_conn() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM birthdays WHERE group_id = %s AND name LIKE %s LIMIT 1",
+                (group_id, f"%{name}%"),
+            )
+            row = cur.fetchone()
+            if row:
+                cur.execute("DELETE FROM birthdays WHERE id = %s", (row["id"],))
+                return dict(row)
+        return None

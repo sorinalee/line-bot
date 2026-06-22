@@ -166,6 +166,12 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str) -> str:
             currency = data.get("currency", "")
             amount = data.get("amount", 0)
             return get_exchange_rate(currency, amount)
+        elif action == "add_birthday":
+            return handle_add_birthday(data, group_id)
+        elif action == "query_birthdays":
+            return handle_query_birthdays(group_id)
+        elif action == "delete_birthday":
+            return handle_delete_birthday(data, group_id)
         elif action == "summary":
             return handle_summary(group_id)
         elif action == "chat":
@@ -447,6 +453,60 @@ def handle_clear_shopping(group_id: str) -> str:
     return "沒有已購買的項目需要清除"
 
 
+# ── 生日 ──────────────────────────────────────────────
+def handle_add_birthday(data: dict, group_id: str) -> str:
+    name = data.get("name", "")
+    month = data.get("month", 0)
+    day = data.get("day", 0)
+    year = data.get("year")
+
+    if not name or not month or not day:
+        return "請告訴我姓名和生日，例如「媽媽生日是3月15號」"
+
+    db.add_birthday(group_id, name, month, day, year)
+
+    date_str = f"{month}/{day}"
+    year_str = f"（{year} 年生）" if year else ""
+    return f"🎂 已記住 {name} 的生日：{date_str}{year_str}"
+
+
+def handle_query_birthdays(group_id: str) -> str:
+    all_bdays = db.get_birthdays(group_id)
+    if not all_bdays:
+        return "還沒有記錄任何生日，用「小助理 媽媽生日是3月15號」來新增吧！"
+
+    upcoming = db.get_upcoming_birthdays(group_id, days=90)
+    now = now_tw()
+
+    lines = ["🎂 生日清單：", ""]
+    for b in all_bdays:
+        date_str = f"{b['month']}/{b['day']}"
+        year_str = f"（{b['year']} 年生）" if b.get("year") else ""
+        lines.append(f"  • {b['name']}：{date_str}{year_str}")
+
+    if upcoming:
+        lines.append("")
+        lines.append("📅 近期生日：")
+        for b in upcoming:
+            if b["days_until"] == 0:
+                lines.append(f"  🎉 {b['name']} — 今天！")
+            else:
+                lines.append(f"  🎈 {b['name']} — {b['days_until']} 天後（{b['month']}/{b['day']}）")
+
+    return "\n".join(lines)
+
+
+def handle_delete_birthday(data: dict, group_id: str) -> str:
+    name = data.get("name", "")
+    if not name:
+        return "請告訴我要刪除誰的生日"
+
+    deleted = db.delete_birthday(group_id, name)
+    if deleted:
+        return f"🗑️ 已刪除 {deleted['name']} 的生日（{deleted['month']}/{deleted['day']}）"
+    return f"找不到「{name}」的生日紀錄"
+
+
 # ── Debug ──────────────────────────────────────────────
 def handle_debug(group_id: str) -> str:
     """列出資料庫中的原始資料，方便偵錯"""
@@ -516,6 +576,12 @@ def get_help_text() -> str:
 • 小助理 牛奶買了
 • 小助理 購物清單
 • 小助理 不用買衛生紙了
+
+【生日提醒】
+• 小助理 媽媽生日是3月15號
+• 小助理 爸爸1965年8月20日生
+• 小助理 生日清單
+• 小助理 刪除媽媽的生日
 
 【匯率查詢】
 • 小助理 美金匯率

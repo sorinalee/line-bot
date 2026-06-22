@@ -70,6 +70,25 @@ def daily_morning_push():
 
         lines = [f"☀️ 早安！今天是 {today_str}", ""]
 
+        # 生日提醒
+        todays_bdays = db.get_todays_birthdays(group_id)
+        if todays_bdays:
+            for b in todays_bdays:
+                age_str = ""
+                if b.get("year"):
+                    age = now_tw().year - b["year"]
+                    age_str = f"（{age} 歲）"
+                lines.append(f"🎂 今天是 {b['name']} 的生日{age_str}！生日快樂！🎉")
+            lines.append("")
+
+        # 近期生日預告（未來7天內，排除今天）
+        upcoming_bdays = db.get_upcoming_birthdays(group_id, days=7)
+        upcoming_bdays = [b for b in upcoming_bdays if b["days_until"] > 0]
+        if upcoming_bdays:
+            for b in upcoming_bdays:
+                lines.append(f"🎈 {b['name']} 的生日在 {b['days_until']} 天後（{b['month']}/{b['day']}）")
+            lines.append("")
+
         # 天氣
         weather = get_weather("")
         weather_first_period = ""
