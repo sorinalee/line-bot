@@ -151,10 +151,10 @@ class GeminiHandler:
             self.model = None
 
     def plan_trip(self, destination: str, start_date: str, days: int,
-                  preferences: str) -> list | None:
-        """讓 Gemini 規劃旅遊行程，回傳每天行程清單"""
+                  preferences: str) -> dict:
+        """讓 Gemini 規劃旅遊行程，回傳 {"data": [...]} 或 {"error": "..."}"""
         if not self.model:
-            return None
+            return {"error": "Gemini API 尚未設定"}
 
         pref_str = f"\n偏好：{preferences}" if preferences else ""
 
@@ -191,10 +191,13 @@ class GeminiHandler:
             if text.endswith("```"):
                 text = text.rsplit("```", 1)[0]
             text = text.strip()
-            return json.loads(text)
+            return {"data": json.loads(text)}
+        except json.JSONDecodeError as e:
+            print(f"[Gemini Trip JSON Error] {e}\nRaw: {text[:500]}")
+            return {"error": f"AI 回傳格式錯誤，請再試一次"}
         except Exception as e:
-            print(f"[Gemini Trip Error] {e}")
-            return None
+            print(f"[Gemini Trip Error] {type(e).__name__}: {e}")
+            return {"error": f"{type(e).__name__}: {str(e)[:100]}"}
 
     def parse_intent(self, user_msg: str, context: str) -> dict | None:
         """解析使用者意圖，回傳結構化 dict，失敗回傳 None"""

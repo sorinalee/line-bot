@@ -554,11 +554,12 @@ def handle_plan_trip(data: dict, group_id: str, user_id: str) -> str:
         tomorrow = now_tw() + timedelta(days=1)
         start_date = tomorrow.strftime("%Y-%m-%d")
 
-    try:
-        itinerary = gemini.plan_trip(destination, start_date, days, preferences)
-    except Exception as e:
-        return f"規劃行程時發生錯誤：{type(e).__name__}"
+    result = gemini.plan_trip(destination, start_date, days, preferences)
 
+    if result.get("error"):
+        return f"⚠️ 規劃行程失敗：{result['error']}"
+
+    itinerary = result.get("data")
     if not itinerary:
         return "規劃行程時 AI 未回傳有效資料，請稍後再試"
 
