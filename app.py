@@ -6,6 +6,7 @@ LLM：Google Gemini API（免費額度）
 
 import os
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 from flask import Flask, request, abort
@@ -79,9 +80,11 @@ def handle_message(event):
             user_msg = user_msg[len(t):].strip()
             break
 
-    # 處理「幫助」指令
+    # 處理特殊指令
     if user_msg in ["幫助", "help", "指令", "?"]:
         reply = get_help_text()
+    elif user_msg in ["debug", "偵錯", "檢查資料"]:
+        reply = handle_debug(group_id)
     else:
         reply = process_with_gemini(user_msg, group_id, user_id)
 
@@ -148,6 +151,62 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str) -> str:
         return f"處理時發生錯誤：{str(e)}"
 
 
+# ── 日期正規化 ──────────────────────────────────────────
+def normalize_date(date_str: str) -> str | None:
+    """將各種日期格式統一轉成 YYYY-MM-DD，失敗回傳 None"""
+    today = now_tw()
+    s = date_str.strip()
+
+    # 已經是 YYYY-MM-DD
+    if re.match(r"^\d{4}-\d{1,2}-\d{1,2}$", s):
+        try:
+            dt = datetime.strptime(s, "%Y-%m-%d")
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    # YYYY/MM/DD
+    if re.match(r"^\d{4}/\d{1,2}/\d{1,2}$", s):
+        try:
+            dt = datetime.strptime(s, "%Y/%m/%d")
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    # MM/DD or M/D（補上今年）
+    if re.match(r"^\d{1,2}/\d{1,2}$", s):
+        try:
+            dt = datetime.strptime(f"{today.year}/{s}", "%Y/%m/%d")
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    # MM-DD or M-D（補上今年）
+    if re.match(r"^\d{1,2}-\d{1,2}$", s):
+        try:
+            dt = datetime.strptime(f"{today.year}-{s}", "%Y-%m-%d")
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    # 中文格式：X月X日 or X月X號
+    m = re.match(r"^(\d{1,2})\s*月\s*(\d{1,2})\s*[日號]?$", s)
+    if m:
+        try:
+            dt = datetime(today.year, int(m.group(1)), int(m.group(2)))
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    # 相對日期
+    relative = {"今天": 0, "明天": 1, "後天": 2, "大後天": 3}
+    if s in relative:
+        dt = today + timedelta(days=relative[s])
+        return dt.strftime("%Y-%m-%d")
+
+    return None
+
+
 # ── 動作處理函式 ─────────────────────────────────────────
 def handle_add_event(data: dict, group_id: str, user_id: str) -> str:
     title = data.get("title", "未命名行程")
@@ -157,7 +216,12 @@ def handle_add_event(data: dict, group_id: str, user_id: str) -> str:
     if not date_str:
         return "請告訴我行程的日期，例如「7/5 下午三點 看牙醫」"
 
-    dt_str = f"{date_str} {time_str}".strip()
+    normalized = normalize_date(date_str)
+    if normalized is None:
+        normalized = date_str  # 無法解析就照原樣存，但記錄警告
+        print(f"[WARNING] 無法正規化日期：'{date_str}'，照原樣存入")
+
+    dt_str = f"{normalized} {time_str}".strip()
     db.add_event(group_id, user_id, title, dt_str)
     return f"✅ 已新增行程：\n📅 {dt_str}\n📌 {title}"
 
@@ -268,6 +332,34 @@ def handle_summary(group_id: str) -> str:
     return "\n".join(lines)
 
 
+# ── Debug ──────────────────────────────────────────────
+def handle_debug(group_id: str) -> str:
+    """列出資料庫中的原始資料，方便偵錯"""
+    today = now_tw().strftime("%Y-%m-%d")
+    all_events = db.get_all_events(group_id)
+    todos = db.get_todos(group_id, status="pending")
+
+    lines = [f"🔍 偵錯資訊（今天={today}）", ""]
+
+    if all_events:
+        lines.append(f"【所有行程】共 {len(all_events)} 筆")
+        for e in all_events:
+            lines.append(f"  id={e['id']} datetime=\"{e['datetime']}\" title=\"{e['title']}\"")
+    else:
+        lines.append("【所有行程】（無）")
+
+    lines.append("")
+
+    if todos:
+        lines.append(f"【待辦事項】共 {len(todos)} 筆")
+        for t in todos:
+            lines.append(f"  id={t['id']} title=\"{t['title']}\"")
+    else:
+        lines.append("【待辦事項】（無）")
+
+    return "\n".join(lines)
+
+
 # ── 輔助函式 ─────────────────────────────────────────────
 def format_events_for_context(events: list) -> str:
     if not events:
@@ -300,6 +392,7 @@ def get_help_text() -> str:
 【其他】
 • 小助理 目前狀態
 • 小助理 幫助
+• 小助理 debug（查看資料庫原始資料）
 
 💡 用自然的方式說就好，我會自己理解！"""
 

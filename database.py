@@ -1,14 +1,18 @@
 """
-SQLite 資料庫模組 — 行程 + 待辦事項
+PostgreSQL 資料庫模組 — 行程 + 待辦事項
 每個群組（group_id）有自己獨立的資料空間
+使用 Railway 提供的 DATABASE_URL 連線
 """
 
-import sqlite3
 import os
 from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
+from urllib.parse import urlparse
 
-DB_PATH = os.environ.get("DB_PATH", "bot_data.db")
+import psycopg2
+import psycopg2.extras
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 # 台灣時區 UTC+8
 TW = timezone(timedelta(hours=8))
@@ -25,43 +29,47 @@ class Database:
 
     @contextmanager
     def _get_conn(self):
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn = psycopg2.connect(DATABASE_URL)
         try:
             yield conn
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 
     def _init_tables(self):
         with self._get_conn() as conn:
-            conn.execute("""
+            cur = conn.cursor()
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     group_id TEXT NOT NULL,
                     user_id TEXT NOT NULL,
                     title TEXT NOT NULL,
                     datetime TEXT NOT NULL,
-                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                    created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
-            conn.execute("""
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS todos (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     group_id TEXT NOT NULL,
                     user_id TEXT NOT NULL,
                     title TEXT NOT NULL,
                     status TEXT DEFAULT 'pending',
-                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
-                    completed_at TEXT
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    completed_at TIMESTAMPTZ
                 )
             """)
 
     # ── 行程 ────────────────────────────────────────────
     def add_event(self, group_id: str, user_id: str, title: str, dt_str: str):
         with self._get_conn() as conn:
-            conn.execute(
-                "INSERT INTO events (group_id, user_id, title, datetime) VALUES (?, ?, ?, ?)",
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO events (group_id, user_id, title, datetime) VALUES (%s, %s, %s, %s)",
                 (group_id, user_id, title, dt_str),
             )
 
@@ -70,57 +78,65 @@ class Database:
         today = now_tw().strftime("%Y-%m-%d")
         end_date = (now_tw() + timedelta(days=max(days, 1))).strftime("%Y-%m-%d")
         with self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM events WHERE group_id = ? AND datetime >= ? AND datetime < ? ORDER BY datetime ASC",
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM events WHERE group_id = %s AND datetime >= %s AND datetime < %s ORDER BY datetime ASC",
                 (group_id, today, end_date),
-            ).fetchall()
-        return [dict(r) for r in rows]
+            )
+            return [dict(r) for r in cur.fetchall()]
 
     def get_all_events(self, group_id: str) -> list:
         """取得所有行程（不過濾日期）"""
         with self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM events WHERE group_id = ? ORDER BY datetime ASC",
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM events WHERE group_id = %s ORDER BY datetime ASC",
                 (group_id,),
-            ).fetchall()
-        return [dict(r) for r in rows]
+            )
+            return [dict(r) for r in cur.fetchall()]
 
     def delete_event_by_keyword(self, group_id: str, keyword: str) -> dict | None:
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM events WHERE group_id = ? AND title LIKE ? LIMIT 1",
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM events WHERE group_id = %s AND title LIKE %s LIMIT 1",
                 (group_id, f"%{keyword}%"),
-            ).fetchone()
+            )
+            row = cur.fetchone()
             if row:
-                conn.execute("DELETE FROM events WHERE id = ?", (row["id"],))
+                cur.execute("DELETE FROM events WHERE id = %s", (row["id"],))
                 return dict(row)
         return None
 
     # ── 待辦 ────────────────────────────────────────────
     def add_todo(self, group_id: str, user_id: str, title: str):
         with self._get_conn() as conn:
-            conn.execute(
-                "INSERT INTO todos (group_id, user_id, title) VALUES (?, ?, ?)",
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO todos (group_id, user_id, title) VALUES (%s, %s, %s)",
                 (group_id, user_id, title),
             )
 
     def get_todos(self, group_id: str, status: str = "pending") -> list:
         with self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM todos WHERE group_id = ? AND status = ? ORDER BY created_at ASC",
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM todos WHERE group_id = %s AND status = %s ORDER BY created_at ASC",
                 (group_id, status),
-            ).fetchall()
-        return [dict(r) for r in rows]
+            )
+            return [dict(r) for r in cur.fetchall()]
 
     def complete_todo_by_keyword(self, group_id: str, keyword: str) -> dict | None:
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM todos WHERE group_id = ? AND status = 'pending' AND title LIKE ? LIMIT 1",
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM todos WHERE group_id = %s AND status = 'pending' AND title LIKE %s LIMIT 1",
                 (group_id, f"%{keyword}%"),
-            ).fetchone()
+            )
+            row = cur.fetchone()
             if row:
-                conn.execute(
-                    "UPDATE todos SET status = 'completed', completed_at = datetime('now', 'localtime') WHERE id = ?",
+                cur.execute(
+                    "UPDATE todos SET status = 'completed', completed_at = NOW() WHERE id = %s",
                     (row["id"],),
                 )
                 return dict(row)
@@ -128,11 +144,13 @@ class Database:
 
     def delete_todo_by_keyword(self, group_id: str, keyword: str) -> dict | None:
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM todos WHERE group_id = ? AND status = 'pending' AND title LIKE ? LIMIT 1",
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM todos WHERE group_id = %s AND status = 'pending' AND title LIKE %s LIMIT 1",
                 (group_id, f"%{keyword}%"),
-            ).fetchone()
+            )
+            row = cur.fetchone()
             if row:
-                conn.execute("DELETE FROM todos WHERE id = ?", (row["id"],))
+                cur.execute("DELETE FROM todos WHERE id = %s", (row["id"],))
                 return dict(row)
         return None
