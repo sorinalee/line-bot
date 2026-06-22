@@ -5,6 +5,9 @@
 
 import os
 import requests
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 CWA_API_KEY = os.environ.get("CWA_API_KEY", "")
 FORECAST_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0032-001"
@@ -52,7 +55,7 @@ def get_weather(location: str = "") -> str:
         resp = requests.get(FORECAST_URL, params={
             "Authorization": CWA_API_KEY,
             "locationName": city,
-        }, timeout=10)
+        }, timeout=10, verify=False)
         data = resp.json()
 
         records = data.get("records", {})
@@ -103,4 +106,4 @@ def get_weather(location: str = "") -> str:
 
     except Exception as e:
         print(f"[Weather Error] {e}")
-        return f"抱歉，天氣資料暫時無法取得：{e}"
+        return "抱歉，天氣資料暫時無法取得，請稍後再試。"
