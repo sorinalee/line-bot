@@ -23,6 +23,7 @@ from linebot.v3.exceptions import InvalidSignatureError
 
 from database import Database
 from gemini_handler import GeminiHandler
+from weather_handler import get_weather
 
 # ── 時區設定 ─────────────────────────────────────────────
 TW = timezone(timedelta(hours=8))
@@ -142,6 +143,9 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str) -> str:
             return handle_query_todos(group_id)
         elif action == "delete_todo":
             return handle_delete_todo(data, group_id)
+        elif action == "query_weather":
+            location = data.get("location", "")
+            return get_weather(location)
         elif action == "summary":
             return handle_summary(group_id)
         elif action == "chat":
