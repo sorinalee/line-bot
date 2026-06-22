@@ -1,16 +1,17 @@
 """
-PostgreSQL 資料庫模組 — 行程 + 待辦事項 + 購物清單
+PostgreSQL 資料庫模組 — 行程 + 待辦事項 + 購物清單 + 生日
 每個群組（group_id）有自己獨立的資料空間
 使用 Railway 提供的 DATABASE_URL 連線
 """
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from contextlib import contextmanager
 from urllib.parse import urlparse
 
 import psycopg2
 import psycopg2.extras
+from lunardate import LunarDate
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
@@ -95,8 +96,15 @@ class Database:
                     month INTEGER NOT NULL,
                     day INTEGER NOT NULL,
                     year INTEGER,
+                    is_lunar BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
+            """)
+            cur.execute("""
+                DO $$ BEGIN
+                    ALTER TABLE birthdays ADD COLUMN is_lunar BOOLEAN DEFAULT FALSE;
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$;
             """)
 
     # ── 行程 ────────────────────────────────────────────
@@ -288,12 +296,12 @@ class Database:
 
     # ── 生日 ────────────────────────────────────────────
     def add_birthday(self, group_id: str, name: str, month: int, day: int,
-                     year: int | None = None):
+                     year: int | None = None, is_lunar: bool = False):
         with self._get_conn() as conn:
             cur = conn.cursor()
             cur.execute(
-                "INSERT INTO birthdays (group_id, name, month, day, year) VALUES (%s, %s, %s, %s, %s)",
-                (group_id, name, month, day, year),
+                "INSERT INTO birthdays (group_id, name, month, day, year, is_lunar) VALUES (%s, %s, %s, %s, %s, %s)",
+                (group_id, name, month, day, year, is_lunar),
             )
 
     def get_birthdays(self, group_id: str) -> list:
@@ -305,36 +313,63 @@ class Database:
             )
             return [dict(r) for r in cur.fetchall()]
 
-    def get_todays_birthdays(self, group_id: str) -> list:
-        """取得今天生日的人"""
-        now = now_tw()
-        with self._get_conn() as conn:
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute(
-                "SELECT * FROM birthdays WHERE group_id = %s AND month = %s AND day = %s",
-                (group_id, now.month, now.day),
-            )
-            return [dict(r) for r in cur.fetchall()]
+    @staticmethod
+    def _lunar_to_solar(lunar_month: int, lunar_day: int, solar_year: int) -> date | None:
+        """將農曆月日轉換為指定國曆年份對應的國曆日期"""
+        try:
+            ld = LunarDate(solar_year, lunar_month, lunar_day)
+            return ld.toSolarDate()
+        except ValueError:
+            # 該年農曆沒有這一天（例如閏月差異），嘗試前一天
+            try:
+                ld = LunarDate(solar_year, lunar_month, lunar_day - 1)
+                return ld.toSolarDate()
+            except ValueError:
+                return None
 
-    def get_upcoming_birthdays(self, group_id: str, days: int = 30) -> list:
-        """取得未來 N 天內的生日"""
+    def _get_solar_date_for_birthday(self, b: dict, target_year: int) -> date | None:
+        """取得某筆生日在 target_year 對應的國曆日期"""
+        if b.get("is_lunar"):
+            return self._lunar_to_solar(b["month"], b["day"], target_year)
+        else:
+            try:
+                return date(target_year, b["month"], b["day"])
+            except ValueError:
+                return None
+
+    def get_todays_birthdays(self, group_id: str) -> list:
+        """取得今天生日的人（支援農曆）"""
         now = now_tw()
+        today = now.date()
         results = []
         all_bdays = self.get_birthdays(group_id)
         for b in all_bdays:
-            try:
-                this_year = datetime(now.year, b["month"], b["day"], tzinfo=TW)
-            except ValueError:
+            solar = self._get_solar_date_for_birthday(b, now.year)
+            if solar and solar == today:
+                results.append(b)
+        return results
+
+    def get_upcoming_birthdays(self, group_id: str, days: int = 30) -> list:
+        """取得未來 N 天內的生日（支援農曆）"""
+        now = now_tw()
+        today = now.date()
+        results = []
+        all_bdays = self.get_birthdays(group_id)
+        for b in all_bdays:
+            # 先查今年
+            solar = self._get_solar_date_for_birthday(b, now.year)
+            if solar and solar < today:
+                # 今年已過，查明年
+                solar = self._get_solar_date_for_birthday(b, now.year + 1)
+            if solar is None:
                 continue
-            if this_year.date() < now.date():
-                this_year = this_year.replace(year=now.year + 1)
-            diff = (this_year.date() - now.date()).days
+            diff = (solar - today).days
             if 0 <= diff <= days:
+                b = dict(b)
                 b["days_until"] = diff
+                b["solar_date"] = solar.strftime("%m/%d")
                 if b.get("year"):
-                    b["age"] = now.year - b["year"] + (1 if diff > 0 else 0)
-                    if this_year.year > now.year:
-                        b["age"] = this_year.year - b["year"]
+                    b["age"] = solar.year - b["year"]
                 results.append(b)
         results.sort(key=lambda x: x["days_until"])
         return results

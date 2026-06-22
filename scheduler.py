@@ -78,7 +78,8 @@ def daily_morning_push():
                 if b.get("year"):
                     age = now_tw().year - b["year"]
                     age_str = f"（{age} 歲）"
-                lines.append(f"🎂 今天是 {b['name']} 的生日{age_str}！生日快樂！🎉")
+                lunar_tag = "🌙農曆 " if b.get("is_lunar") else ""
+                lines.append(f"🎂 今天是 {b['name']} 的{lunar_tag}生日{age_str}！生日快樂！🎉")
             lines.append("")
 
         # 近期生日預告（未來7天內，排除今天）
@@ -86,7 +87,9 @@ def daily_morning_push():
         upcoming_bdays = [b for b in upcoming_bdays if b["days_until"] > 0]
         if upcoming_bdays:
             for b in upcoming_bdays:
-                lines.append(f"🎈 {b['name']} 的生日在 {b['days_until']} 天後（{b['month']}/{b['day']}）")
+                lunar_tag = "🌙" if b.get("is_lunar") else ""
+                solar_hint = f"，國曆 {b['solar_date']}" if b.get("is_lunar") and b.get("solar_date") else ""
+                lines.append(f"🎈 {lunar_tag}{b['name']} 的生日在 {b['days_until']} 天後（{b['month']}/{b['day']}{solar_hint}）")
             lines.append("")
 
         # 天氣

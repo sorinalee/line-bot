@@ -459,15 +459,23 @@ def handle_add_birthday(data: dict, group_id: str) -> str:
     month = data.get("month", 0)
     day = data.get("day", 0)
     year = data.get("year")
+    is_lunar = data.get("is_lunar", False)
 
     if not name or not month or not day:
-        return "請告訴我姓名和生日，例如「媽媽生日是3月15號」"
+        return "請告訴我姓名和生日，例如「媽媽生日是3月15號」或「阿嬤農曆九月初三生日」"
 
-    db.add_birthday(group_id, name, month, day, year)
+    db.add_birthday(group_id, name, month, day, year, is_lunar=is_lunar)
 
-    date_str = f"{month}/{day}"
+    cal_type = "農曆" if is_lunar else ""
+    date_str = f"{cal_type}{month}/{day}"
     year_str = f"（{year} 年生）" if year else ""
-    return f"🎂 已記住 {name} 的生日：{date_str}{year_str}"
+
+    reply = f"🎂 已記住 {name} 的生日：{date_str}{year_str}"
+    if is_lunar:
+        solar = db._lunar_to_solar(month, day, now_tw().year)
+        if solar:
+            reply += f"\n📅 今年國曆對應：{solar.month}/{solar.day}"
+    return reply
 
 
 def handle_query_birthdays(group_id: str) -> str:
@@ -476,22 +484,26 @@ def handle_query_birthdays(group_id: str) -> str:
         return "還沒有記錄任何生日，用「小助理 媽媽生日是3月15號」來新增吧！"
 
     upcoming = db.get_upcoming_birthdays(group_id, days=90)
-    now = now_tw()
 
     lines = ["🎂 生日清單：", ""]
     for b in all_bdays:
+        lunar_tag = "（農曆）" if b.get("is_lunar") else ""
         date_str = f"{b['month']}/{b['day']}"
         year_str = f"（{b['year']} 年生）" if b.get("year") else ""
-        lines.append(f"  • {b['name']}：{date_str}{year_str}")
+        lines.append(f"  • {b['name']}：{lunar_tag}{date_str}{year_str}")
 
     if upcoming:
         lines.append("")
         lines.append("📅 近期生日：")
         for b in upcoming:
+            lunar_tag = "🌙" if b.get("is_lunar") else ""
+            solar_str = f"國曆 {b['solar_date']}" if b.get("is_lunar") and b.get("solar_date") else ""
             if b["days_until"] == 0:
-                lines.append(f"  🎉 {b['name']} — 今天！")
+                extra = f" {solar_str}" if solar_str else ""
+                lines.append(f"  🎉 {lunar_tag}{b['name']} — 今天！{extra}")
             else:
-                lines.append(f"  🎈 {b['name']} — {b['days_until']} 天後（{b['month']}/{b['day']}）")
+                extra = f"（{solar_str}）" if solar_str else ""
+                lines.append(f"  🎈 {lunar_tag}{b['name']} — {b['days_until']} 天後{extra}")
 
     return "\n".join(lines)
 
@@ -580,6 +592,7 @@ def get_help_text() -> str:
 【生日提醒】
 • 小助理 媽媽生日是3月15號
 • 小助理 爸爸1965年8月20日生
+• 小助理 阿嬤農曆九月初三生日
 • 小助理 生日清單
 • 小助理 刪除媽媽的生日
 
