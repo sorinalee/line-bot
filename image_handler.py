@@ -1,18 +1,17 @@
 """
 Gemini 圖片生成模組 — 早安圖等圖片生成功能
 使用 Gemini 2.0 Flash 的原生圖片生成能力
-圖片透過 Imgur 匿名上傳取得公開 URL 供 LINE 傳送
+圖片透過 Catbox.moe 匿名上傳取得公開 URL 供 LINE 傳送（免費、免 API Key）
 """
 
 import os
-import base64
+import io
 import random
 import requests
 import google.generativeai as genai
 from google.generativeai import types
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-IMGUR_CLIENT_ID = os.environ.get("IMGUR_CLIENT_ID", "")
 
 MORNING_THEMES = [
     "中國風山水畫",
@@ -32,8 +31,6 @@ def generate_morning_image() -> dict:
     """生成早安圖，回傳 {"url": "...", "text": "..."} 或 {"error": "..."}"""
     if not GEMINI_API_KEY:
         return {"error": "Gemini API 尚未設定"}
-    if not IMGUR_CLIENT_ID:
-        return {"error": "Imgur API 尚未設定，請設定 IMGUR_CLIENT_ID 環境變數"}
 
     theme = random.choice(MORNING_THEMES)
 
@@ -75,8 +72,7 @@ def generate_morning_image() -> dict:
         if not image_data:
             return {"error": "Gemini 未能生成圖片，請稍後再試"}
 
-        # 上傳到 Imgur
-        img_url = _upload_to_imgur(image_data)
+        img_url = _upload_to_catbox(image_data)
         if not img_url:
             return {"error": "圖片上傳失敗，請稍後再試"}
 
@@ -91,8 +87,6 @@ def generate_custom_image(prompt: str) -> dict:
     """根據自訂 prompt 生成圖片"""
     if not GEMINI_API_KEY:
         return {"error": "Gemini API 尚未設定"}
-    if not IMGUR_CLIENT_ID:
-        return {"error": "Imgur API 尚未設定，請設定 IMGUR_CLIENT_ID 環境變數"}
 
     try:
         genai.configure(api_key=GEMINI_API_KEY)
@@ -117,7 +111,7 @@ def generate_custom_image(prompt: str) -> dict:
         if not image_data:
             return {"error": "Gemini 未能生成圖片，請稍後再試"}
 
-        img_url = _upload_to_imgur(image_data)
+        img_url = _upload_to_catbox(image_data)
         if not img_url:
             return {"error": "圖片上傳失敗，請稍後再試"}
 
@@ -128,24 +122,23 @@ def generate_custom_image(prompt: str) -> dict:
         return {"error": f"生成圖片時發生錯誤：{str(e)}"}
 
 
-def _upload_to_imgur(image_bytes: bytes) -> str | None:
-    """上傳圖片到 Imgur，回傳公開 URL"""
-    if not IMGUR_CLIENT_ID:
-        return None
-
+def _upload_to_catbox(image_bytes: bytes) -> str | None:
+    """上傳圖片到 Catbox.moe（免費、免 API Key），回傳公開 HTTPS URL"""
     try:
-        b64 = base64.b64encode(image_bytes).decode("utf-8")
+        files = {
+            "fileToUpload": ("image.png", io.BytesIO(image_bytes), "image/png"),
+        }
+        data = {"reqtype": "fileupload"}
         resp = requests.post(
-            "https://api.imgur.com/3/image",
-            headers={"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"},
-            data={"image": b64, "type": "base64"},
+            "https://catbox.moe/user/api.php",
+            files=files,
+            data=data,
             timeout=30,
         )
-        data = resp.json()
-        if data.get("success"):
-            return data["data"]["link"]
-        print(f"[Imgur Error] {data}")
+        if resp.status_code == 200 and resp.text.startswith("https://"):
+            return resp.text.strip()
+        print(f"[Catbox Error] status={resp.status_code} body={resp.text}")
         return None
     except Exception as e:
-        print(f"[Imgur Upload Error] {e}")
+        print(f"[Catbox Upload Error] {e}")
         return None
