@@ -251,7 +251,7 @@ line-bot/
 - **Flask** + **gunicorn**（Python 3.13）
 - **LINE Messaging API v3 SDK**
 - **Google Gemini API**（gemini-2.5-flash）— 自然語言意圖解析
-- **Google Gemini 2.0 Flash**（Experimental）— AI 圖片生成
+- **Pollinations.ai** — AI 圖片生成（免費、免 API Key）
 - **Catbox.moe** — 圖片匿名上傳（免費、免 API Key）
 - **PostgreSQL**（Railway 提供）
 - **APScheduler** — 每日推播、週期行程產生、行程歸檔

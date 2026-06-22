@@ -1,6 +1,6 @@
 """
 圖片生成模組 — 早安圖等圖片生成功能
-使用 google-genai SDK + Gemini 2.5 Flash Image 生成圖片
+使用 Pollinations.ai 免費 AI 圖片生成（無需 API Key）
 圖片透過 Catbox.moe 匿名上傳取得公開 URL 供 LINE 傳送
 """
 
@@ -8,79 +8,39 @@ import os
 import io
 import random
 import requests
-from google import genai
-from google.genai import types
-
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-
-IMAGE_MODEL = "gemini-2.5-flash-image"
+from urllib.parse import quote
 
 MORNING_THEMES = [
-    ("Chinese ink wash painting", "中國風山水畫"),
-    ("cute animals illustration", "可愛小動物"),
-    ("modern city lifestyle", "現代都會風格"),
-    ("beautiful natural scenery", "美麗自然景色"),
-    ("Japanese style illustration", "日式和風插畫"),
-    ("European garden scene", "歐洲花園風格"),
-    ("tropical beach scenery", "熱帶海灘風景"),
-    ("warm family illustration", "溫馨家庭插畫"),
-    ("watercolor floral art", "水彩花卉風格"),
-    ("cute cartoon style", "童趣卡通風格"),
+    ("Chinese ink wash painting with mountains and river", "中國風山水畫"),
+    ("cute fluffy animals like cats and dogs", "可愛小動物"),
+    ("modern city sunrise skyline", "現代都會風格"),
+    ("beautiful natural scenery with flowers and sunshine", "美麗自然景色"),
+    ("Japanese zen garden illustration", "日式和風插畫"),
+    ("European flower garden with morning light", "歐洲花園風格"),
+    ("tropical beach with palm trees and sunrise", "熱帶海灘風景"),
+    ("warm cozy family breakfast scene", "溫馨家庭插畫"),
+    ("watercolor painting of spring flowers", "水彩花卉風格"),
+    ("cute cartoon characters greeting", "童趣卡通風格"),
 ]
-
-
-def _get_client():
-    return genai.Client(api_key=GEMINI_API_KEY)
-
-
-def _generate_image(prompt: str) -> tuple[bytes | None, str]:
-    """呼叫 Gemini 生成圖片，回傳 (image_bytes, text_content)"""
-    client = _get_client()
-    response = client.models.generate_content(
-        model=IMAGE_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_modalities=["IMAGE", "TEXT"],
-        ),
-    )
-
-    image_data = None
-    text_content = ""
-
-    for part in response.candidates[0].content.parts:
-        if part.inline_data and part.inline_data.data:
-            image_data = part.inline_data.data
-        elif part.text:
-            text_content = part.text.strip()
-
-    return image_data, text_content
 
 
 def generate_morning_image() -> dict:
     """生成早安圖，回傳 {"url": "...", "text": "..."} 或 {"error": "..."}"""
-    if not GEMINI_API_KEY:
-        return {"error": "Gemini API 尚未設定"}
-
     theme_en, theme_zh = random.choice(MORNING_THEMES)
 
     prompt = (
-        f"Generate a bright, warm 'Good Morning' greeting card illustration.\n"
-        f"Style: {theme_en}.\n"
-        f"Requirements:\n"
-        f"- Include the large Chinese characters '早安' prominently\n"
-        f"- Add a short positive Chinese phrase below it\n"
-        f"- Bright, warm, hopeful mood\n"
-        f"- Text must be clearly readable against the background\n"
-        f"- Square format, high quality illustration"
+        f"A bright cheerful Good Morning greeting card, {theme_en}, "
+        f"with large beautiful Chinese text '早安' (Good Morning) prominently displayed, "
+        f"warm golden sunlight, positive uplifting mood, "
+        f"high quality digital illustration, square format"
     )
 
     try:
-        image_data, text_content = _generate_image(prompt)
+        image_bytes = _generate_with_pollinations(prompt)
+        if not image_bytes:
+            return {"error": "圖片生成失敗，請稍後再試"}
 
-        if not image_data:
-            return {"error": "未能生成圖片，請稍後再試"}
-
-        img_url = _upload_to_catbox(image_data)
+        img_url = _upload_to_catbox(image_bytes)
         if not img_url:
             return {"error": "圖片上傳失敗，請稍後再試"}
 
@@ -93,24 +53,36 @@ def generate_morning_image() -> dict:
 
 def generate_custom_image(prompt: str) -> dict:
     """根據自訂 prompt 生成圖片"""
-    if not GEMINI_API_KEY:
-        return {"error": "Gemini API 尚未設定"}
-
     try:
-        image_data, text_content = _generate_image(prompt)
+        image_bytes = _generate_with_pollinations(prompt)
+        if not image_bytes:
+            return {"error": "圖片生成失敗，請稍後再試"}
 
-        if not image_data:
-            return {"error": "未能生成圖片，請稍後再試"}
-
-        img_url = _upload_to_catbox(image_data)
+        img_url = _upload_to_catbox(image_bytes)
         if not img_url:
             return {"error": "圖片上傳失敗，請稍後再試"}
 
-        return {"url": img_url, "text": text_content}
+        return {"url": img_url, "text": ""}
 
     except Exception as e:
         print(f"[Image Error] {e}")
         return {"error": f"生成圖片時發生錯誤：{str(e)}"}
+
+
+def _generate_with_pollinations(prompt: str) -> bytes | None:
+    """透過 Pollinations.ai 免費生成圖片，回傳 image bytes"""
+    encoded = quote(prompt)
+    seed = random.randint(1, 999999)
+    url = (
+        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"?width=1024&height=1024&seed={seed}&nologo=true"
+    )
+
+    resp = requests.get(url, timeout=60)
+    if resp.status_code == 200 and len(resp.content) > 1000:
+        return resp.content
+    print(f"[Pollinations Error] status={resp.status_code} size={len(resp.content)}")
+    return None
 
 
 def _upload_to_catbox(image_bytes: bytes) -> str | None:
