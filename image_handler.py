@@ -1,6 +1,6 @@
 """
 Gemini 圖片生成模組 — 早安圖等圖片生成功能
-使用 Gemini 2.0 Flash 的原生圖片生成能力
+使用 google-genai SDK + Gemini 2.0 Flash 的原生圖片生成能力
 圖片透過 Catbox.moe 匿名上傳取得公開 URL 供 LINE 傳送（免費、免 API Key）
 """
 
@@ -8,8 +8,8 @@ import os
 import io
 import random
 import requests
-import google.generativeai as genai
-from google.generativeai import types
+from google import genai
+from google.genai import types
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
@@ -25,6 +25,33 @@ MORNING_THEMES = [
     "水彩花卉風格",
     "童趣卡通風格",
 ]
+
+
+def _get_client():
+    return genai.Client(api_key=GEMINI_API_KEY)
+
+
+def _generate_image(prompt: str) -> tuple[bytes | None, str]:
+    """呼叫 Gemini 生成圖片，回傳 (image_bytes, text_content)"""
+    client = _get_client()
+    response = client.models.generate_content(
+        model="gemini-2.0-flash-exp",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_modalities=["IMAGE", "TEXT"],
+        ),
+    )
+
+    image_data = None
+    text_content = ""
+
+    for part in response.candidates[0].content.parts:
+        if part.inline_data and part.inline_data.data:
+            image_data = part.inline_data.data
+        elif part.text:
+            text_content = part.text.strip()
+
+    return image_data, text_content
 
 
 def generate_morning_image() -> dict:
@@ -50,24 +77,7 @@ def generate_morning_image() -> dict:
 請生成圖片。"""
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash-exp")
-
-        response = model.generate_content(
-            prompt,
-            generation_config=types.GenerationConfig(
-                response_modalities=["IMAGE", "TEXT"],
-            ),
-        )
-
-        image_data = None
-        text_content = ""
-
-        for part in response.candidates[0].content.parts:
-            if hasattr(part, "inline_data") and part.inline_data:
-                image_data = part.inline_data.data
-            elif hasattr(part, "text") and part.text:
-                text_content = part.text.strip()
+        image_data, text_content = _generate_image(prompt)
 
         if not image_data:
             return {"error": "Gemini 未能生成圖片，請稍後再試"}
@@ -89,24 +99,7 @@ def generate_custom_image(prompt: str) -> dict:
         return {"error": "Gemini API 尚未設定"}
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash-exp")
-
-        response = model.generate_content(
-            prompt,
-            generation_config=types.GenerationConfig(
-                response_modalities=["IMAGE", "TEXT"],
-            ),
-        )
-
-        image_data = None
-        text_content = ""
-
-        for part in response.candidates[0].content.parts:
-            if hasattr(part, "inline_data") and part.inline_data:
-                image_data = part.inline_data.data
-            elif hasattr(part, "text") and part.text:
-                text_content = part.text.strip()
+        image_data, text_content = _generate_image(prompt)
 
         if not image_data:
             return {"error": "Gemini 未能生成圖片，請稍後再試"}
