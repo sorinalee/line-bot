@@ -7,7 +7,9 @@ LLM：Google Gemini API（免費額度）
 import os
 import json
 import re
+import requests
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 
 from flask import Flask, request, abort
 from linebot.v3 import WebhookHandler
@@ -711,6 +713,62 @@ def handle_plan_trip(data: dict, group_id: str, user_id: str) -> str:
 
 
 # ── 收藏功能 ─────────────────────────────────────────────
+class _TextExtractor(HTMLParser):
+    """從 HTML 中提取純文字"""
+    def __init__(self):
+        super().__init__()
+        self._pieces = []
+        self._skip = False
+        self._skip_tags = {"script", "style", "noscript", "nav", "footer", "header"}
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._skip_tags:
+            self._skip = True
+
+    def handle_endtag(self, tag):
+        if tag in self._skip_tags:
+            self._skip = False
+
+    def handle_data(self, data):
+        if not self._skip:
+            text = data.strip()
+            if text:
+                self._pieces.append(text)
+
+    def get_text(self):
+        return "\n".join(self._pieces)
+
+
+def fetch_url_content(url: str) -> dict:
+    """抓取網頁標題和內文摘要"""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; LineBot/1.0)"}
+        resp = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
+        resp.encoding = resp.apparent_encoding or "utf-8"
+        html = resp.text[:50000]
+
+        title = ""
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+        if title_match:
+            title = title_match.group(1).strip()
+
+        og_title = re.search(r'property=["\']og:title["\'][^>]*content=["\']([^"\']+)', html, re.IGNORECASE)
+        if og_title:
+            title = og_title.group(1).strip()
+
+        og_desc = re.search(r'property=["\']og:description["\'][^>]*content=["\']([^"\']+)', html, re.IGNORECASE)
+        description = og_desc.group(1).strip() if og_desc else ""
+
+        extractor = _TextExtractor()
+        extractor.feed(html)
+        body_text = extractor.get_text()[:2000]
+
+        return {"title": title, "description": description, "body": body_text}
+    except Exception as e:
+        print(f"[URL Fetch Error] {e}")
+        return {"title": "", "description": "", "body": ""}
+
+
 CATEGORY_EMOJI = {
     "待讀": "📖", "待辦": "✅", "靈感": "💡",
     "帳務": "💰", "工作": "💼", "家庭": "🏠",
@@ -723,7 +781,16 @@ def handle_save_collection(data: dict, user_id: str) -> str:
         return "請告訴我要收藏什麼內容"
 
     has_url = "http://" in content or "https://" in content
-    analysis = gemini.analyze_collection(content)
+
+    analysis_input = content
+    if has_url:
+        url_match = re.search(r"https?://\S+", content)
+        if url_match:
+            page = fetch_url_content(url_match.group(0))
+            if page["title"] or page["body"]:
+                analysis_input = f"網址：{url_match.group(0)}\n標題：{page['title']}\n描述：{page['description']}\n內文：{page['body'][:1000]}"
+
+    analysis = gemini.analyze_collection(analysis_input)
 
     category = analysis.get("category", "靈感")
     title = analysis.get("title", content[:10])
