@@ -66,28 +66,30 @@ def make_text_message(text: str, is_group: bool = True) -> TextMessage:
 # ── Flex: 收藏清單 ────────────────────────────────────────
 
 def _collection_bubble(item: dict) -> dict:
-    cat = item.get("category", "未分類")
+    cat = item.get("category") or "未分類"
     color = CATEGORY_COLORS.get(cat, "#888888")
     emoji = CATEGORY_EMOJI.get(cat, "📌")
-    title = item.get("title", "")[:30]
-    cid = item.get("id", 0)
+    title = (item.get("title") or "")[:30]
+    cid = item.get("id") or 0
+    source_url = item.get("source_url") or ""
     date_str = ""
-    if hasattr(item.get("created_at"), "strftime"):
-        date_str = item["created_at"].strftime("%m/%d")
-    elif item.get("created_at"):
-        date_str = str(item["created_at"])[:5]
+    created_at = item.get("created_at")
+    if hasattr(created_at, "strftime"):
+        date_str = created_at.strftime("%m/%d")
+    elif created_at:
+        date_str = str(created_at)[:5]
 
     body_contents = [
         {
             "type": "text",
-            "text": f"#{cid} {title}",
+            "text": f"#{cid} {title}" if title else f"#{cid}（無標題）",
             "weight": "bold",
             "size": "md",
             "wrap": True,
         },
     ]
 
-    summary = item.get("summary", "")
+    summary = item.get("summary") or ""
     if summary:
         summary_lines = summary.split("\n")
         first_line = (summary_lines[0][:80]).strip() or summary.strip()[:80] or "（無摘要）"
@@ -156,7 +158,6 @@ def _collection_bubble(item: dict) -> dict:
     }
 
     footer_buttons = []
-    source_url = item.get("source_url", "")
     if source_url:
         footer_buttons.append({
             "type": "button",

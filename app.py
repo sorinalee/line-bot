@@ -150,13 +150,17 @@ def handle_message(event):
 
     # 不需要 Gemini 的指令：同步處理，用 reply（免費）
     quick_result = None
-    if user_msg in ["幫助", "help", "指令", "?"]:
-        quick_result = get_help_text(is_private=is_private)
-    elif user_msg in ["debug", "偵錯", "檢查資料"]:
-        quick_result = handle_debug(group_id)
-    else:
-        quick_result = try_keyword_shortcut(user_msg, group_id, user_id,
-                                             is_private=is_private)
+    try:
+        if user_msg in ["幫助", "help", "指令", "?"]:
+            quick_result = get_help_text(is_private=is_private)
+        elif user_msg in ["debug", "偵錯", "檢查資料"]:
+            quick_result = handle_debug(group_id)
+        else:
+            quick_result = try_keyword_shortcut(user_msg, group_id, user_id,
+                                                 is_private=is_private)
+    except Exception as e:
+        print(f"[Keyword Handler Error] {type(e).__name__}: {e}")
+        quick_result = f"處理指令時發生錯誤：{type(e).__name__}: {e}"
 
     if quick_result is not None:
         try:
