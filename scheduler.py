@@ -151,27 +151,23 @@ def daily_evening_summary():
 
         category_emoji = {
             "待讀": "📖", "待辦": "✅", "靈感": "💡",
-            "帳務": "💰", "工作": "💼", "家庭": "🏠",
+            "帳務": "💰", "工作": "💼", "家庭": "🏠", "工具箱": "🧰",
         }
 
-        category_counts = {}
-        action_items = []
+        lines = [f"📊 今日收藏摘要（共 {len(items)} 筆）"]
+        need_action = []
         for item in items:
             cat = item.get("category", "未分類")
-            category_counts[cat] = category_counts.get(cat, 0) + 1
-            if item.get("status") == "unread":
-                action_items.append(item)
-
-        lines = [f"📊 今日收藏摘要（共 {len(items)} 筆）", ""]
-        for cat, count in sorted(category_counts.items()):
             emoji = category_emoji.get(cat, "📌")
-            lines.append(f"{emoji} {cat}：{count} 筆")
+            lines.append(f"\n{emoji} [{cat}] {item.get('title', '')}")
+            summary = item.get("summary", "")
+            if summary:
+                lines.append(f"   {summary[:60]}")
+            if item.get("status") == "unread" and cat in ("待辦", "帳務", "工作"):
+                need_action.append(item)
 
-        if action_items:
-            need_action = [i for i in action_items
-                           if i.get("category") in ("待辦", "帳務", "工作")]
-            if need_action:
-                lines.append(f"\n⚡ 其中 {len(need_action)} 筆可能需要處理")
+        if need_action:
+            lines.append(f"\n⚡ 其中 {len(need_action)} 筆可能需要處理")
 
         lines.append("\n💡 輸入「我的收藏」可查看完整清單")
 

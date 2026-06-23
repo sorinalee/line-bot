@@ -388,6 +388,8 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str,
             return handle_query_collections(data, user_id)
         elif action == "search_collections":
             return handle_search_collections(data, user_id)
+        elif action == "draft_reply":
+            return handle_draft_reply(data)
         elif action == "summary":
             return handle_summary(group_id)
         elif action == "chat":
@@ -1006,6 +1008,13 @@ def handle_save_collection(data: dict, user_id: str) -> str:
     if summary:
         lines.append(f"📝 {summary}")
 
+    key_points = analysis.get("key_points", [])
+    if key_points:
+        lines.append("")
+        lines.append("📌 重點：")
+        for pt in key_points[:5]:
+            lines.append(f"  • {pt}")
+
     if analysis.get("has_deadline") and analysis.get("deadline_date"):
         deadline = analysis["deadline_date"]
         lines.append(f"⏰ 截止日：{deadline}")
@@ -1016,6 +1025,29 @@ def handle_save_collection(data: dict, user_id: str) -> str:
         lines.append(f"👉 {analysis['action_needed']}")
 
     return "\n".join(lines)
+
+
+def handle_draft_reply(data: dict) -> str:
+    context = data.get("context", "")
+    if not context:
+        return "請告訴我對方說了什麼，例如「幫我回覆：老闆說週五要交報告」"
+    tone = data.get("tone", "正式")
+    tone_hint = "語氣正式有禮、專業簡潔" if tone == "正式" else "語氣輕鬆自然、像朋友聊天"
+    prompt = (
+        f"請根據以下情境代擬一段回覆稿，{tone_hint}，繁體中文，直接給回覆內容即可，"
+        f"不需要加稱謂或署名（使用者會自行調整）。\n\n情境：{context}"
+    )
+    try:
+        import google.generativeai as genai
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        response = model.generate_content(prompt)
+        draft = response.text.strip()
+        lines = ["✏️ 以下是擬好的回覆稿：", "", draft, "", "（可直接複製貼上，或告訴我要調整的地方）"]
+        return "\n".join(lines)
+    except Exception as e:
+        if "ResourceExhausted" in type(e).__name__ or "429" in str(e):
+            return "⚠️ AI 額度已滿，寫作助手暫時無法使用，請稍後再試。"
+        return f"草擬回覆時發生錯誤：{type(e).__name__}"
 
 
 def handle_query_collections(data: dict, user_id: str) -> str:

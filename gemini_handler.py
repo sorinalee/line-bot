@@ -124,7 +124,13 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
     - 「找一下之前存的停車費」→ {"action": "search_collections", "data": {"keywords": ["停車費", "停車", "車位", "停車場"]}}
     - 「有沒有關於報名的收藏」→ {"action": "search_collections", "data": {"keywords": ["報名", "報名表", "註冊", "登記"]}}
 
-25. **chat** — 一般閒聊或無法歸類
+25. **draft_reply** — 代擬回覆稿（LINE 或 EMAIL 回信）
+    - 「幫我回覆：老闆說週五要交報告」→ {"action": "draft_reply", "data": {"context": "老闆說週五要交報告", "tone": "正式"}}
+    - 「幫我草擬回信：客戶問能不能打折」→ {"action": "draft_reply", "data": {"context": "客戶問能不能打折", "tone": "正式"}}
+    - 「幫我想一下怎麼回：朋友約吃飯但我沒空」→ {"action": "draft_reply", "data": {"context": "朋友約吃飯但我沒空", "tone": "輕鬆"}}
+    tone 判斷：工作/客戶/長輩 → "正式"，朋友/家人/輕鬆語境 → "輕鬆"
+
+26. **chat** — 一般閒聊或無法歸類
     回傳：{"action": "chat", "reply": "你的回覆內容"}
 
 ## 旅遊規劃 vs 一般聊天的判斷規則
@@ -163,6 +169,7 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
 - 如果使用者問天氣、時事等你有能力回答的問題，用 chat 回覆即可
 - 「我的收藏」「收藏清單」「今天收藏了什麼」是 query_collections
 - 「找一下之前存的…」「有沒有關於…的收藏」是 search_collections，keywords 要包含原始詞和同義詞
+- 「幫我回覆」「幫我回」「怎麼回」「草擬回信」「擬個回覆」是 draft_reply
 """
 
 
@@ -173,12 +180,20 @@ COLLECTION_PROMPT = """你是一個個人助理，使用者轉貼了以下內容
   "category": "待讀/待辦/靈感/帳務/工作/家庭/工具箱",
   "title": "簡短標題（10字以內）",
   "summary": "重點摘要（50字以內）",
+  "key_points": ["重點1", "重點2", "重點3"],
   "has_deadline": true/false,
   "deadline_date": "YYYY-MM-DD 或空字串",
   "has_amount": true/false,
   "amount": "金額文字或空字串",
   "action_needed": "需要使用者做的事，沒有就空字串"
 }
+
+key_points 規則：
+- 從內容中提取 2~5 條最重要的資訊，每條 15 字以內
+- 文章/網頁：核心觀點或結論
+- 工具/App：主要功能或用途
+- 帳務：金額、期限、繳費方式
+- 如果內容太短或無法提取重點，key_points 留空陣列 []
 
 分類規則：
 - 文章/新聞/教學連結 → 待讀
