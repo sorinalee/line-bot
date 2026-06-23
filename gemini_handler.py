@@ -120,8 +120,9 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
     - 「我的收藏」「今天收藏了什麼」→ {"action": "query_collections", "data": {"category": ""}}
     - 「看帳務的收藏」→ {"action": "query_collections", "data": {"category": "帳務"}}
 
-24. **search_collections** — 搜尋收藏
-    - 「找一下之前存的停車費」→ {"action": "search_collections", "data": {"keyword": "停車費"}}
+24. **search_collections** — 搜尋收藏（keywords 須包含原始詞 + 3~5 個同義詞/相關詞）
+    - 「找一下之前存的停車費」→ {"action": "search_collections", "data": {"keywords": ["停車費", "停車", "車位", "停車場"]}}
+    - 「有沒有關於報名的收藏」→ {"action": "search_collections", "data": {"keywords": ["報名", "報名表", "註冊", "登記"]}}
 
 25. **chat** — 一般閒聊或無法歸類
     回傳：{"action": "chat", "reply": "你的回覆內容"}
@@ -161,7 +162,7 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
 - 如果是 chat，reply 請用親切口語的繁體中文回覆，簡短就好
 - 如果使用者問天氣、時事等你有能力回答的問題，用 chat 回覆即可
 - 「我的收藏」「收藏清單」「今天收藏了什麼」是 query_collections
-- 「找一下之前存的…」「有沒有關於…的收藏」是 search_collections
+- 「找一下之前存的…」「有沒有關於…的收藏」是 search_collections，keywords 要包含原始詞和同義詞
 """
 
 
@@ -286,32 +287,6 @@ class GeminiHandler:
             return {"category": "靈感", "title": "圖片", "summary": f"辨識失敗（{err_msg}）",
                     "ocr_text": "", "has_deadline": False, "deadline_date": "",
                     "has_amount": False, "amount": "", "action_needed": ""}
-
-    def expand_search_keywords(self, query: str) -> list:
-        """用 Gemini 將搜尋語句拆解成多個同義/相關關鍵詞"""
-        if not self.model:
-            return [query]
-        prompt = (
-            "使用者要在收藏庫中搜尋，請將以下搜尋語句拆解成 3~6 個繁體中文關鍵詞（含原始詞），"
-            "涵蓋同義詞、常見別名、相關概念。只回傳 JSON 陣列，不要其他文字。\n\n"
-            f"搜尋語句：{query}\n\n"
-            '範例：「停車場費用」→ ["停車場費用", "停車費", "停車", "車位", "月租車位"]'
-        )
-        try:
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            response = _call_with_retry(
-                lambda: model.generate_content(prompt))
-            result_text = response.text.strip()
-            if result_text.startswith("```"):
-                result_text = result_text.split("\n", 1)[-1]
-            if result_text.endswith("```"):
-                result_text = result_text.rsplit("```", 1)[0]
-            keywords = json.loads(result_text.strip())
-            if isinstance(keywords, list) and keywords:
-                return keywords
-        except Exception as e:
-            print(f"[Gemini Expand Keywords Error] {e}")
-        return [query]
 
     def plan_trip(self, destination: str, start_date: str, days: int,
                   preferences: str) -> dict:

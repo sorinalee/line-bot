@@ -929,16 +929,19 @@ def handle_query_collections(data: dict, user_id: str) -> str:
 
 
 def handle_search_collections(data: dict, user_id: str) -> str:
-    keyword = data.get("keyword", "")
-    if not keyword:
+    keywords = data.get("keywords", [])
+    if not keywords:
+        keyword = data.get("keyword", "")
+        keywords = [keyword] if keyword else []
+    if not keywords:
         return "請告訴我要找什麼，例如「找一下停車費」"
 
-    keywords = gemini.expand_search_keywords(keyword)
+    display_keyword = keywords[0]
     items = db.search_collections(user_id, keywords)
     if not items:
-        return f"找不到與「{keyword}」相關的收藏"
+        return f"找不到與「{display_keyword}」相關的收藏"
 
-    lines = [f"🔍 與「{keyword}」相關的收藏（{len(items)} 筆）：", ""]
+    lines = [f"🔍 與「{display_keyword}」相關的收藏（{len(items)} 筆）：", ""]
     for item in items[:10]:
         emoji = CATEGORY_EMOJI.get(item["category"], "📌")
         lines.append(f"{emoji} [{item['category']}] {item['title']}")
