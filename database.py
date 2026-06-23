@@ -504,6 +504,21 @@ class Database:
             )
             return [dict(r) for r in cur.fetchall()]
 
+    def update_collection_memo(self, collection_id: int, title: str,
+                               summary: str, category: str = "") -> None:
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            if category:
+                cur.execute(
+                    "UPDATE collections SET title = %s, summary = %s, raw_text = %s, category = %s WHERE id = %s",
+                    (title, summary, summary, category, collection_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE collections SET title = %s, summary = %s, raw_text = %s WHERE id = %s",
+                    (title, summary, summary, collection_id),
+                )
+
     def get_all_user_ids_with_collections_today(self) -> list:
         today = now_tw().strftime("%Y-%m-%d")
         with self._get_conn() as conn:

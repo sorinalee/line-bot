@@ -51,6 +51,7 @@ configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 db = Database()
 gemini = GeminiHandler(GEMINI_API_KEY)
+_pending_image_memo = {}  # {user_id: collection_id} — 等待使用者為圖片加備註
 
 
 # ── Webhook 入口 ────────────────────────────────────────
@@ -108,6 +109,32 @@ def handle_message(event):
                 user_msg = user_msg[len(t):].strip()
                 break
     # 1 對 1 模式：直接處理，不需要觸發詞
+
+    # 檢查是否有待補備註的圖片收藏
+    if not is_group and user_id in _pending_image_memo:
+        collection_id = _pending_image_memo.pop(user_id)
+        if user_msg in ["跳過", "不用", "算了", "skip"]:
+            reply_text = "好的，已跳過備註。"
+        else:
+            rule_cat = classify_by_rules(user_msg)
+            db.update_collection_memo(
+                collection_id,
+                title=user_msg[:10],
+                summary=user_msg[:50],
+                category=rule_cat or "",
+            )
+            cat_label = rule_cat or "靈感"
+            emoji = CATEGORY_EMOJI.get(cat_label, "📌")
+            reply_text = f"✅ 已為圖片加上備註並歸類為 {emoji}{cat_label}\n📋 {user_msg[:10]}"
+        with ApiClient(configuration) as api_client:
+            messaging_api = MessagingApi(api_client)
+            messaging_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text=reply_text)],
+                )
+            )
+        return
 
     # 不需要 Gemini 的指令：同步處理，用 reply（免費）
     quick_result = None
@@ -179,9 +206,9 @@ def handle_image_message(event):
             ocr_text = analysis.get("ocr_text", "")
 
             if is_quota_error:
-                summary = "（AI 額度已滿，圖片暫存，額度恢復後可重新辨識）"
+                summary = ""
 
-            db.add_collection(
+            saved = db.add_collection(
                 user_id=user_id,
                 content_type="image",
                 category=category,
@@ -190,26 +217,32 @@ def handle_image_message(event):
                 raw_text=ocr_text,
             )
 
-            emoji = CATEGORY_EMOJI.get(category, "📌")
-            lines = [f"{emoji} 已收藏 → {category}", f"📋 {title}"]
-            if summary:
-                lines.append(f"📝 {summary}")
-            if ocr_text:
-                lines.append(f"🔍 辨識文字：{ocr_text[:200]}")
+            if is_quota_error:
+                _pending_image_memo[user_id] = saved["id"]
+                result = ("📷 圖片已暫存收藏，但 AI 額度已滿無法辨識。\n"
+                          "請輸入一段備註描述這張圖片（方便日後搜尋），\n"
+                          "或輸入「跳過」不加備註。")
+            else:
+                emoji = CATEGORY_EMOJI.get(category, "📌")
+                lines = [f"{emoji} 已收藏 → {category}", f"📋 {title}"]
+                if summary:
+                    lines.append(f"📝 {summary}")
+                if ocr_text:
+                    lines.append(f"🔍 辨識文字：{ocr_text[:200]}")
 
-            if analysis.get("has_deadline") and analysis.get("deadline_date"):
-                deadline = analysis["deadline_date"]
-                lines.append(f"⏰ 截止日：{deadline}")
-                db.add_event(user_id, user_id, f"[截止] {title}", deadline)
-                lines.append("→ 已自動加入行程提醒")
+                if analysis.get("has_deadline") and analysis.get("deadline_date"):
+                    deadline = analysis["deadline_date"]
+                    lines.append(f"⏰ 截止日：{deadline}")
+                    db.add_event(user_id, user_id, f"[截止] {title}", deadline)
+                    lines.append("→ 已自動加入行程提醒")
 
-            if analysis.get("has_amount") and analysis.get("amount"):
-                lines.append(f"💰 金額：{analysis['amount']}")
+                if analysis.get("has_amount") and analysis.get("amount"):
+                    lines.append(f"💰 金額：{analysis['amount']}")
 
-            if analysis.get("action_needed"):
-                lines.append(f"👉 {analysis['action_needed']}")
+                if analysis.get("action_needed"):
+                    lines.append(f"👉 {analysis['action_needed']}")
 
-            result = "\n".join(lines)
+                result = "\n".join(lines)
         except Exception as e:
             print(f"[Image Handler Error] {type(e).__name__}: {e}")
             result = f"圖片處理失敗：{type(e).__name__}"
