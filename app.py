@@ -933,11 +933,12 @@ def handle_search_collections(data: dict, user_id: str) -> str:
     if not keyword:
         return "請告訴我要找什麼，例如「找一下停車費」"
 
-    items = db.search_collections(user_id, keyword)
+    keywords = gemini.expand_search_keywords(keyword)
+    items = db.search_collections(user_id, keywords)
     if not items:
-        return f"找不到包含「{keyword}」的收藏"
+        return f"找不到與「{keyword}」相關的收藏"
 
-    lines = [f"🔍 包含「{keyword}」的收藏（{len(items)} 筆）：", ""]
+    lines = [f"🔍 與「{keyword}」相關的收藏（{len(items)} 筆）：", ""]
     for item in items[:10]:
         emoji = CATEGORY_EMOJI.get(item["category"], "📌")
         lines.append(f"{emoji} [{item['category']}] {item['title']}")

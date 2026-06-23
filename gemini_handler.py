@@ -287,6 +287,32 @@ class GeminiHandler:
                     "ocr_text": "", "has_deadline": False, "deadline_date": "",
                     "has_amount": False, "amount": "", "action_needed": ""}
 
+    def expand_search_keywords(self, query: str) -> list:
+        """用 Gemini 將搜尋語句拆解成多個同義/相關關鍵詞"""
+        if not self.model:
+            return [query]
+        prompt = (
+            "使用者要在收藏庫中搜尋，請將以下搜尋語句拆解成 3~6 個繁體中文關鍵詞（含原始詞），"
+            "涵蓋同義詞、常見別名、相關概念。只回傳 JSON 陣列，不要其他文字。\n\n"
+            f"搜尋語句：{query}\n\n"
+            '範例：「停車場費用」→ ["停車場費用", "停車費", "停車", "車位", "月租車位"]'
+        )
+        try:
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            response = _call_with_retry(
+                lambda: model.generate_content(prompt))
+            result_text = response.text.strip()
+            if result_text.startswith("```"):
+                result_text = result_text.split("\n", 1)[-1]
+            if result_text.endswith("```"):
+                result_text = result_text.rsplit("```", 1)[0]
+            keywords = json.loads(result_text.strip())
+            if isinstance(keywords, list) and keywords:
+                return keywords
+        except Exception as e:
+            print(f"[Gemini Expand Keywords Error] {e}")
+        return [query]
+
     def plan_trip(self, destination: str, start_date: str, days: int,
                   preferences: str) -> dict:
         """讓 Gemini 規劃旅遊行程，回傳 {"data": [...]} 或 {"error": "..."}"""

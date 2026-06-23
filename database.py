@@ -485,14 +485,22 @@ class Database:
             )
             return [dict(r) for r in cur.fetchall()]
 
-    def search_collections(self, user_id: str, keyword: str) -> list:
+    def search_collections(self, user_id: str, keywords: list) -> list:
+        if not keywords:
+            return []
         with self._get_conn() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            conditions = []
+            params = [user_id]
+            for kw in keywords:
+                conditions.append("(title LIKE %s OR summary LIKE %s OR raw_text LIKE %s)")
+                params.extend([f"%{kw}%", f"%{kw}%", f"%{kw}%"])
+            where = " OR ".join(conditions)
             cur.execute(
-                """SELECT * FROM collections WHERE user_id = %s
-                   AND (title LIKE %s OR summary LIKE %s OR raw_text LIKE %s)
-                   ORDER BY created_at DESC LIMIT 20""",
-                (user_id, f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"),
+                f"""SELECT * FROM collections
+                    WHERE user_id = %s AND ({where})
+                    ORDER BY created_at DESC LIMIT 20""",
+                params,
             )
             return [dict(r) for r in cur.fetchall()]
 
