@@ -163,6 +163,38 @@ class Database:
                 cur.execute("DELETE FROM events WHERE id = ANY(%s)", (ids,))
             return rows
 
+    def update_event_by_keyword(self, group_id: str, keyword: str,
+                                new_date: str = "", new_time: str = "",
+                                new_title: str = "") -> dict | None:
+        """依關鍵字找到行程並更新日期/時間/標題，回傳更新後的行程"""
+        with self._get_conn() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM events WHERE group_id = %s AND archived = FALSE AND title LIKE %s ORDER BY datetime LIMIT 1",
+                (group_id, f"%{keyword}%"),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            row = dict(row)
+
+            old_dt = row["datetime"]
+            old_date_part = old_dt[:10] if len(old_dt) >= 10 else old_dt
+            old_time_part = old_dt[11:] if len(old_dt) > 10 else ""
+
+            updated_date = new_date if new_date else old_date_part
+            updated_time = new_time if new_time else old_time_part
+            updated_dt = f"{updated_date} {updated_time}".strip()
+            updated_title = new_title if new_title else row["title"]
+
+            cur.execute(
+                "UPDATE events SET title = %s, datetime = %s WHERE id = %s",
+                (updated_title, updated_dt, row["id"]),
+            )
+            row["title"] = updated_title
+            row["datetime"] = updated_dt
+            return row
+
     def archive_old_events(self, days_old: int = 365):
         """將超過指定天數的過期行程歸檔"""
         cutoff = (now_tw() - timedelta(days=days_old)).strftime("%Y-%m-%d")

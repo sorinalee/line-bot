@@ -142,6 +142,8 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str) -> str:
             return handle_search_events(data, group_id)
         elif action == "delete_event":
             return handle_delete_event(data, group_id)
+        elif action == "update_event":
+            return handle_update_event(data, group_id)
         elif action == "add_todo":
             return handle_add_todo(data, group_id, user_id)
         elif action == "complete_todo":
@@ -316,6 +318,30 @@ def handle_delete_event(data: dict, group_id: str) -> str:
     for d in deleted_list:
         lines.append(f"  • {d['title']}（{d['datetime']}）")
     return "\n".join(lines)
+
+
+def handle_update_event(data: dict, group_id: str) -> str:
+    keyword = data.get("keyword", "")
+    if not keyword:
+        return "請告訴我要修改哪個行程，例如「看牙醫改到下週五」"
+
+    new_date = normalize_date(data.get("new_date", "")) if data.get("new_date") else ""
+    new_time = data.get("new_time", "")
+    new_title = data.get("new_title", "")
+
+    if not new_date and not new_time and not new_title:
+        return "請告訴我要改什麼，例如日期、時間或行程名稱"
+
+    updated = db.update_event_by_keyword(
+        group_id, keyword,
+        new_date=new_date or "",
+        new_time=new_time,
+        new_title=new_title,
+    )
+    if not updated:
+        return f"找不到包含「{keyword}」的行程"
+
+    return f"📝 已修改行程：{updated['title']}（{updated['datetime']}）"
 
 
 def handle_add_todo(data: dict, group_id: str, user_id: str) -> str:
