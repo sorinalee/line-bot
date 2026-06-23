@@ -223,6 +223,10 @@ def build_collection_flex(items: list, title: str = "我的收藏") -> FlexMessa
 def build_save_confirmation_flex(category: str, title: str, summary: str,
                                   key_points: list = None, source_url: str = "",
                                   extra_info: list = None) -> FlexMessage:
+    category = category or "未分類"
+    title = title or "（無標題）"
+    summary = summary or ""
+    source_url = source_url or ""
     color = CATEGORY_COLORS.get(category, "#888888")
     emoji = CATEGORY_EMOJI.get(category, "📌")
 

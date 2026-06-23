@@ -87,11 +87,14 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
     - 「匯率」→ {"action": "query_exchange", "data": {"currency": "", "amount": 0}}
     注意：如果沒指定幣別，currency 留空字串（會顯示常用匯率總覽）。amount 預設 0 表示只查匯率不換算。
 
-18. **add_birthday** — 新增生日（支援國曆和農曆，支援一次多筆）
-    - 單筆：「媽媽生日是3月15號」→ {"action": "add_birthday", "data": {"items": [{"name": "媽媽", "month": 3, "day": 15, "year": null, "is_lunar": false}]}}
-    - 單筆農曆：「阿嬤農曆九月初三生日」→ {"action": "add_birthday", "data": {"items": [{"name": "阿嬤", "month": 9, "day": 3, "year": null, "is_lunar": true}]}}
-    - 多筆：「媽媽3月15號、爸爸8月20號、阿嬤農曆九月初三」→ {"action": "add_birthday", "data": {"items": [{"name": "媽媽", "month": 3, "day": 15, "year": null, "is_lunar": false}, {"name": "爸爸", "month": 8, "day": 20, "year": null, "is_lunar": false}, {"name": "阿嬤", "month": 9, "day": 3, "year": null, "is_lunar": true}]}}
+18. **add_birthday** — 新增生日或紀念日（支援國曆和農曆，支援一次多筆）
+    - 單筆生日：「媽媽生日是3月15號」→ {"action": "add_birthday", "data": {"items": [{"name": "媽媽", "month": 3, "day": 15, "year": null, "is_lunar": false, "event_type": "birthday"}]}}
+    - 單筆農曆：「阿嬤農曆九月初三生日」→ {"action": "add_birthday", "data": {"items": [{"name": "阿嬤", "month": 9, "day": 3, "year": null, "is_lunar": true, "event_type": "birthday"}]}}
+    - 紀念日：「結婚紀念日是6月15號」→ {"action": "add_birthday", "data": {"items": [{"name": "結婚紀念日", "month": 6, "day": 15, "year": null, "is_lunar": false, "event_type": "anniversary"}]}}
+    - 紀念日：「交往紀念日是2020年3月8號」→ {"action": "add_birthday", "data": {"items": [{"name": "交往紀念日", "month": 3, "day": 8, "year": 2020, "is_lunar": false, "event_type": "anniversary"}]}}
+    - 多筆：「媽媽3月15號、爸爸8月20號、阿嬤農曆九月初三」→ {"action": "add_birthday", "data": {"items": [{"name": "媽媽", "month": 3, "day": 15, "year": null, "is_lunar": false, "event_type": "birthday"}, {"name": "爸爸", "month": 8, "day": 20, "year": null, "is_lunar": false, "event_type": "birthday"}, {"name": "阿嬤", "month": 9, "day": 3, "year": null, "is_lunar": true, "event_type": "birthday"}]}}
     注意：一律使用 items 陣列，即使只有一筆也放在陣列裡。year 可以是 null 或整數。month 和 day 必須是整數。
+    **event_type 判斷規則**：提到「紀念日」「週年」「anniversary」→ "anniversary"，其餘（生日、壽辰）→ "birthday"。
     **is_lunar 判斷規則**：每個人獨立判斷。提到「農曆」「舊曆」「陰曆」「初X」「正月」「臘月」時該筆 is_lunar 為 true，否則為 false。同一句話中可以混合國曆和農曆。
     農曆月份對照：正月=1、二月=2…臘月=12。日期對照：初一=1、初二=2…初十=10、十一=11…二十=20、廿一=21…三十=30。
 

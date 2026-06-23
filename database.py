@@ -107,6 +107,12 @@ class Database:
                 END $$;
             """)
             cur.execute("""
+                DO $$ BEGIN
+                    ALTER TABLE birthdays ADD COLUMN event_type TEXT DEFAULT 'birthday';
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$;
+            """)
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS collections (
                     id SERIAL PRIMARY KEY,
                     user_id TEXT NOT NULL,
@@ -360,12 +366,13 @@ class Database:
 
     # ── 生日 ────────────────────────────────────────────
     def add_birthday(self, group_id: str, name: str, month: int, day: int,
-                     year: int | None = None, is_lunar: bool = False):
+                     year: int | None = None, is_lunar: bool = False,
+                     event_type: str = "birthday"):
         with self._get_conn() as conn:
             cur = conn.cursor()
             cur.execute(
-                "INSERT INTO birthdays (group_id, name, month, day, year, is_lunar) VALUES (%s, %s, %s, %s, %s, %s)",
-                (group_id, name, month, day, year, is_lunar),
+                "INSERT INTO birthdays (group_id, name, month, day, year, is_lunar, event_type) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (group_id, name, month, day, year, is_lunar, event_type),
             )
 
     def get_birthdays(self, group_id: str) -> list:

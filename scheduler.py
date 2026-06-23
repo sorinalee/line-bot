@@ -71,26 +71,37 @@ def daily_morning_push():
 
         lines = [f"☀️ 早安！今天是 {today_str}", ""]
 
-        # 生日提醒
+        # 生日＋紀念日提醒
         todays_bdays = db.get_todays_birthdays(group_id)
         if todays_bdays:
             for b in todays_bdays:
-                age_str = ""
-                if b.get("year"):
-                    age = now_tw().year - b["year"]
-                    age_str = f"（{age} 歲）"
+                is_anniv = b.get("event_type") == "anniversary"
                 lunar_tag = "🌙農曆 " if b.get("is_lunar") else ""
-                lines.append(f"🎂 今天是 {b['name']} 的{lunar_tag}生日{age_str}！生日快樂！🎉")
+                if is_anniv:
+                    years_str = ""
+                    if b.get("year"):
+                        diff = now_tw().year - b["year"]
+                        years_str = f"（第 {diff} 年）"
+                    lines.append(f"💍 今天是{lunar_tag}{b['name']}{years_str}！")
+                else:
+                    age_str = ""
+                    if b.get("year"):
+                        age = now_tw().year - b["year"]
+                        age_str = f"（{age} 歲）"
+                    lines.append(f"🎂 今天是 {b['name']} 的{lunar_tag}生日{age_str}！生日快樂！🎉")
             lines.append("")
 
-        # 近期生日預告（未來7天內，排除今天）
+        # 近期生日＋紀念日預告（未來7天內，排除今天）
         upcoming_bdays = db.get_upcoming_birthdays(group_id, days=7)
         upcoming_bdays = [b for b in upcoming_bdays if b["days_until"] > 0]
         if upcoming_bdays:
             for b in upcoming_bdays:
+                is_anniv = b.get("event_type") == "anniversary"
+                icon = "💍" if is_anniv else "🎈"
                 lunar_tag = "🌙" if b.get("is_lunar") else ""
+                label = b["name"] if is_anniv else f"{b['name']} 的生日"
                 solar_hint = f"，國曆 {b['solar_date']}" if b.get("is_lunar") and b.get("solar_date") else ""
-                lines.append(f"🎈 {lunar_tag}{b['name']} 的生日在 {b['days_until']} 天後（{b['month']}/{b['day']}{solar_hint}）")
+                lines.append(f"{icon} {lunar_tag}{label}在 {b['days_until']} 天後（{b['month']}/{b['day']}{solar_hint}）")
             lines.append("")
 
         # 天氣

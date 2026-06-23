@@ -201,6 +201,11 @@ def handle_message(event):
             send_reply(reply_token, target_id, result, is_group)
         except Exception as e:
             print(f"[Background Error] {type(e).__name__}: {e}")
+            try:
+                error_msg = f"處理時發生錯誤：{type(e).__name__}"
+                send_reply(reply_token, target_id, error_msg, is_group)
+            except Exception:
+                pass
 
     threading.Thread(target=_process, daemon=True).start()
 
@@ -782,7 +787,7 @@ def handle_add_birthday(data: dict, group_id: str) -> str:
                   "is_lunar": data.get("is_lunar", False)}]
 
     if not items:
-        return "請告訴我姓名和生日，例如「媽媽生日是3月15號」或「阿嬤農曆九月初三生日」"
+        return "請告訴我姓名和生日或紀念日，例如「媽媽生日是3月15號」「結婚紀念日6月15號」"
 
     results = []
     for item in items:
@@ -791,16 +796,25 @@ def handle_add_birthday(data: dict, group_id: str) -> str:
         day = item.get("day", 0)
         year = item.get("year")
         is_lunar = item.get("is_lunar", False)
+        event_type = item.get("event_type", "birthday")
 
         if not name or not month or not day:
             continue
 
-        db.add_birthday(group_id, name, month, day, year, is_lunar=is_lunar)
+        db.add_birthday(group_id, name, month, day, year, is_lunar=is_lunar,
+                        event_type=event_type)
 
+        is_anniversary = event_type == "anniversary"
+        icon = "💍" if is_anniversary else "🎂"
         cal_type = "農曆" if is_lunar else ""
         date_str = f"{cal_type}{month}/{day}"
-        year_str = f"（{year} 年生）" if year else ""
-        line = f"  🎂 {name}：{date_str}{year_str}"
+        if is_anniversary and year:
+            year_str = f"（{year} 年起）"
+        elif year:
+            year_str = f"（{year} 年生）"
+        else:
+            year_str = ""
+        line = f"  {icon} {name}：{date_str}{year_str}"
 
         if is_lunar:
             solar = db._lunar_to_solar(month, day, now_tw().year)
@@ -812,35 +826,67 @@ def handle_add_birthday(data: dict, group_id: str) -> str:
     if not results:
         return "請告訴我姓名和生日，例如「媽媽3月15號、爸爸8月20號」"
 
-    return f"✅ 已記住 {len(results)} 位生日：\n" + "\n".join(results)
+    birthday_count = sum(1 for r in results if "🎂" in r)
+    anniv_count = sum(1 for r in results if "💍" in r)
+    label_parts = []
+    if birthday_count:
+        label_parts.append(f"{birthday_count} 位生日")
+    if anniv_count:
+        label_parts.append(f"{anniv_count} 個紀念日")
+    return f"✅ 已記住{'、'.join(label_parts)}：\n" + "\n".join(results)
 
 
 def handle_query_birthdays(group_id: str) -> str:
     all_bdays = db.get_birthdays(group_id)
     if not all_bdays:
-        return "還沒有記錄任何生日，用「小助理 媽媽生日是3月15號」來新增吧！"
+        return "還沒有記錄任何生日或紀念日，用「小助理 媽媽生日是3月15號」來新增吧！"
 
     upcoming = db.get_upcoming_birthdays(group_id, days=90)
 
-    lines = ["🎂 生日清單：", ""]
-    for b in all_bdays:
-        lunar_tag = "（農曆）" if b.get("is_lunar") else ""
-        date_str = f"{b['month']}/{b['day']}"
-        year_str = f"（{b['year']} 年生）" if b.get("year") else ""
-        lines.append(f"  • {b['name']}：{lunar_tag}{date_str}{year_str}")
+    birthdays = [b for b in all_bdays if b.get("event_type", "birthday") == "birthday"]
+    anniversaries = [b for b in all_bdays if b.get("event_type") == "anniversary"]
+
+    lines = []
+    if birthdays:
+        lines.append("🎂 生日清單：")
+        lines.append("")
+        for b in birthdays:
+            lunar_tag = "（農曆）" if b.get("is_lunar") else ""
+            date_str = f"{b['month']}/{b['day']}"
+            year_str = f"（{b['year']} 年生）" if b.get("year") else ""
+            lines.append(f"  • {b['name']}：{lunar_tag}{date_str}{year_str}")
+
+    if anniversaries:
+        if lines:
+            lines.append("")
+        lines.append("💍 紀念日清單：")
+        lines.append("")
+        for b in anniversaries:
+            lunar_tag = "（農曆）" if b.get("is_lunar") else ""
+            date_str = f"{b['month']}/{b['day']}"
+            year_str = f"（{b['year']} 年起）" if b.get("year") else ""
+            years_passed = ""
+            if b.get("year"):
+                diff = now_tw().year - b["year"]
+                if diff > 0:
+                    years_passed = f" 第 {diff} 年"
+            lines.append(f"  • {b['name']}：{lunar_tag}{date_str}{year_str}{years_passed}")
 
     if upcoming:
         lines.append("")
-        lines.append("📅 近期生日：")
+        lines.append("📅 近期提醒：")
         for b in upcoming:
+            is_anniv = b.get("event_type") == "anniversary"
+            icon_today = "🎉" if not is_anniv else "💍"
+            icon_soon = "🎈" if not is_anniv else "💍"
             lunar_tag = "🌙" if b.get("is_lunar") else ""
             solar_str = f"國曆 {b['solar_date']}" if b.get("is_lunar") and b.get("solar_date") else ""
             if b["days_until"] == 0:
                 extra = f" {solar_str}" if solar_str else ""
-                lines.append(f"  🎉 {lunar_tag}{b['name']} — 今天！{extra}")
+                lines.append(f"  {icon_today} {lunar_tag}{b['name']} — 今天！{extra}")
             else:
                 extra = f"（{solar_str}）" if solar_str else ""
-                lines.append(f"  🎈 {lunar_tag}{b['name']} — {b['days_until']} 天後{extra}")
+                lines.append(f"  {icon_soon} {lunar_tag}{b['name']} — {b['days_until']} 天後{extra}")
 
     return "\n".join(lines)
 
