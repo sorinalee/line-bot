@@ -80,7 +80,7 @@ def _to_message(result, is_group: bool = True):
 
 
 def send_reply(reply_token: str, target_id: str, result, is_group: bool = True):
-    """先嘗試用 reply（免費），失敗則改用 push"""
+    """先嘗試用 reply（免費），失敗則改用 push，Flex 失敗再降級純文字"""
     msg = _to_message(result, is_group)
     with ApiClient(configuration) as api_client:
         messaging_api = MessagingApi(api_client)
@@ -91,13 +91,33 @@ def send_reply(reply_token: str, target_id: str, result, is_group: bool = True):
                     messages=[msg],
                 )
             )
+            return
         except Exception:
+            pass
+        try:
             messaging_api.push_message(
                 PushMessageRequest(
                     to=target_id,
                     messages=[msg],
                 )
             )
+            return
+        except Exception as e:
+            print(f"[send_reply] push failed: {e}")
+        # Flex Message 失敗時降級為純文字
+        if isinstance(msg, FlexMessage):
+            fallback_text = msg.alt_text or "操作完成"
+            print(f"[send_reply] Flex failed, falling back to text: {fallback_text}")
+            fallback_msg = line_ui.make_text_message(fallback_text, is_group)
+            try:
+                messaging_api.push_message(
+                    PushMessageRequest(
+                        to=target_id,
+                        messages=[fallback_msg],
+                    )
+                )
+            except Exception as e2:
+                print(f"[send_reply] text fallback also failed: {e2}")
 
 
 # ── 訊息處理 ────────────────────────────────────────────
@@ -200,9 +220,10 @@ def handle_message(event):
                                          is_private=is_private)
             send_reply(reply_token, target_id, result, is_group)
         except Exception as e:
-            print(f"[Background Error] {type(e).__name__}: {e}")
+            error_detail = str(e)[:200]
+            print(f"[Background Error] {type(e).__name__}: {error_detail}")
             try:
-                error_msg = f"處理時發生錯誤：{type(e).__name__}"
+                error_msg = f"處理時發生錯誤：{type(e).__name__}\n{error_detail}"
                 send_reply(reply_token, target_id, error_msg, is_group)
             except Exception:
                 pass
