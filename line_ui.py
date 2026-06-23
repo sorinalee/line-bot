@@ -74,6 +74,8 @@ def _collection_bubble(item: dict) -> dict:
     date_str = ""
     if hasattr(item.get("created_at"), "strftime"):
         date_str = item["created_at"].strftime("%m/%d")
+    elif item.get("created_at"):
+        date_str = str(item["created_at"])[:5]
 
     body_contents = [
         {
@@ -88,7 +90,7 @@ def _collection_bubble(item: dict) -> dict:
     summary = item.get("summary", "")
     if summary:
         summary_lines = summary.split("\n")
-        first_line = summary_lines[0][:80]
+        first_line = (summary_lines[0][:80]).strip() or summary.strip()[:80] or "（無摘要）"
         body_contents.append({
             "type": "text",
             "text": first_line,
@@ -116,28 +118,31 @@ def _collection_bubble(item: dict) -> dict:
             "margin": "sm",
         })
 
+    header_contents = [
+        {
+            "type": "text",
+            "text": f"{emoji} {cat}",
+            "color": "#FFFFFF",
+            "weight": "bold",
+            "size": "sm",
+        },
+    ]
+    if date_str:
+        header_contents.append({
+            "type": "text",
+            "text": date_str,
+            "color": "#FFFFFFCC",
+            "size": "xs",
+            "align": "end",
+        })
+
     bubble = {
         "type": "bubble",
         "size": "kilo",
         "header": {
             "type": "box",
             "layout": "horizontal",
-            "contents": [
-                {
-                    "type": "text",
-                    "text": f"{emoji} {cat}",
-                    "color": "#FFFFFF",
-                    "weight": "bold",
-                    "size": "sm",
-                },
-                {
-                    "type": "text",
-                    "text": date_str,
-                    "color": "#FFFFFFCC",
-                    "size": "xs",
-                    "align": "end",
-                },
-            ],
+            "contents": header_contents,
             "backgroundColor": color,
             "paddingAll": "12px",
         },
@@ -313,8 +318,8 @@ def build_save_confirmation_flex(category: str, title: str, summary: str,
 def build_events_flex(events: list, label: str, is_group: bool = True) -> FlexMessage:
     body_contents = []
     for e in events[:15]:
-        dt_str = e.get("datetime", "")
-        title = e.get("title", "")
+        dt_str = e.get("datetime", "") or "（未定）"
+        title = e.get("title", "") or "（無標題）"
         recur = " 🔁" if e.get("recurrence") else ""
         body_contents.append({
             "type": "box",

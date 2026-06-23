@@ -151,7 +151,7 @@ def handle_message(event):
     # 不需要 Gemini 的指令：同步處理，用 reply（免費）
     quick_result = None
     if user_msg in ["幫助", "help", "指令", "?"]:
-        quick_result = get_help_text()
+        quick_result = get_help_text(is_private=is_private)
     elif user_msg in ["debug", "偵錯", "檢查資料"]:
         quick_result = handle_debug(group_id)
     else:
@@ -159,14 +159,31 @@ def handle_message(event):
                                              is_private=is_private)
 
     if quick_result is not None:
-        with ApiClient(configuration) as api_client:
-            messaging_api = MessagingApi(api_client)
-            messaging_api.reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=[_to_message(quick_result, is_group)],
+        try:
+            with ApiClient(configuration) as api_client:
+                messaging_api = MessagingApi(api_client)
+                messaging_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[_to_message(quick_result, is_group)],
+                    )
                 )
-            )
+        except Exception as e:
+            print(f"[Reply Error] {type(e).__name__}: {e}")
+            try:
+                fallback = str(quick_result) if not isinstance(quick_result, str) else quick_result
+                if isinstance(quick_result, FlexMessage):
+                    fallback = quick_result.alt_text or "請重新操作"
+                with ApiClient(configuration) as api_client:
+                    messaging_api = MessagingApi(api_client)
+                    messaging_api.push_message(
+                        PushMessageRequest(
+                            to=group_id,
+                            messages=[_to_message(fallback, is_group)],
+                        )
+                    )
+            except Exception as e2:
+                print(f"[Fallback Error] {type(e2).__name__}: {e2}")
         return
 
     # 需要 Gemini 的指令：背景處理，避免 webhook 超時導致 LINE 重試
@@ -1262,7 +1279,40 @@ def format_shopping_for_context(shopping: list) -> str:
     return "\n".join(f"- {s['item']}" for s in shopping)
 
 
-def get_help_text() -> str:
+def get_help_text(is_private: bool = False) -> str:
+    if is_private:
+        return """🤖 個人助理使用說明
+
+直接傳訊息給我就好，不需要加「小助理」：
+
+【收藏管理】
+• 傳送網址、文字、圖片 → 自動收藏分類
+• 我的收藏 / 收藏清單
+• 找一下{關鍵字}
+• 修改收藏 {編號} {新內容}
+• 重新辨識（補辨識額度不足時的圖片）
+
+【寫作助手】
+• 幫我回覆：{對方說的話}
+
+【行程管理】
+• 下週三下午兩點看牙醫
+• 這週有什麼行程？
+• 取消看牙醫
+
+【待辦事項】
+• 待辦：繳電話費、寄包裹
+• 電話費繳了
+• 待辦清單
+
+【其他】
+• 天氣（查詢天氣預報）
+• 目前狀態（總覽）
+
+💡 用自然的方式說就好，我會自己理解！
+⏰ 每天早上 7:30 自動推播今日行程和天氣
+🌙 每天晚上 9:00 自動推播今日收藏摘要"""
+
     return """🤖 家庭助理使用說明
 
 跟我說話時請以「小助理」或「/」開頭，例如：
@@ -1301,21 +1351,15 @@ def get_help_text() -> str:
 • 小助理 幫我規劃花蓮三天兩夜
 • 小助理 7/10出發去台南玩兩天
 
-【收藏管理】（1 對 1 模式）
-• 傳送網址、文字、圖片 → 自動收藏
-• 我的收藏 / 收藏清單
-• 找一下{關鍵字}
-• 修改收藏 {編號} {新內容}
-• 重新辨識（補辨識額度不足時的圖片）
-• 幫我回覆：{對方說的話}（寫作助手）
-
 【其他】
 • 小助理 天氣（查詢天氣預報）
 • 小助理 目前狀態（總覽）
 • 小助理 幫助
 
 💡 用自然的方式說就好，我會自己理解！
-⏰ 每天早上 7:30 會自動推播今日行程和天氣"""
+⏰ 每天早上 7:30 會自動推播今日行程和天氣
+
+📱 1 對 1 私訊我可使用個人收藏功能"""
 
 
 # ── 啟動排程 ───────────────────────────────────────────
