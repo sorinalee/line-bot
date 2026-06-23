@@ -67,21 +67,21 @@ def callback():
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     user_msg = event.message.text.strip()
-    group_id = getattr(event.source, "group_id", None) or event.source.user_id
+    is_group = hasattr(event.source, "group_id") and event.source.group_id
+    group_id = event.source.group_id if is_group else event.source.user_id
     user_id = event.source.user_id
 
-    # 觸發詞（可自行修改名稱）
-    trigger_words = ["小助理", "/", "！", "!"]
-    triggered = any(user_msg.startswith(t) for t in trigger_words)
-
-    if not triggered:
-        return
-
-    # 去掉觸發詞
-    for t in trigger_words:
-        if user_msg.startswith(t):
-            user_msg = user_msg[len(t):].strip()
-            break
+    if is_group:
+        # 群組模式：需要觸發詞
+        trigger_words = ["小助理", "/", "！", "!"]
+        triggered = any(user_msg.startswith(t) for t in trigger_words)
+        if not triggered:
+            return
+        for t in trigger_words:
+            if user_msg.startswith(t):
+                user_msg = user_msg[len(t):].strip()
+                break
+    # 1 對 1 模式：直接處理，不需要觸發詞
 
     # 處理特殊指令（關鍵字直接攔截，不經 Gemini）
     if user_msg in ["幫助", "help", "指令", "?"]:
