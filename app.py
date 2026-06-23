@@ -218,10 +218,12 @@ def handle_image_message(event):
             )
 
             if is_quota_error:
+                _save_image_with_cleanup(saved["id"], image_bytes)
                 _pending_image_memo[user_id] = saved["id"]
                 result = ("📷 圖片已暫存收藏，但 AI 額度已滿無法辨識。\n"
                           "請輸入一段備註描述這張圖片（方便日後搜尋），\n"
-                          "或輸入「跳過」不加備註。")
+                          "或輸入「跳過」不加備註。\n"
+                          "💡 額度恢復後輸入「重新辨識」可補辨識。")
             else:
                 emoji = CATEGORY_EMOJI.get(category, "📌")
                 lines = [f"{emoji} 已收藏 → {category}", f"📋 {title}"]
@@ -287,6 +289,10 @@ def try_keyword_shortcut(user_msg: str, group_id: str, user_id: str,
                 emoji = CATEGORY_EMOJI.get(item["category"], "📌")
                 lines.append(f"{emoji} [{item['category']}] {item['title']}")
             return "\n".join(lines)
+        if msg in ["重新辨識", "補辨識", "辨識圖片"]:
+            return handle_retry_ocr(user_id)
+        if msg.startswith("修改收藏"):
+            return handle_edit_collection(msg, user_id)
 
     return None
 
@@ -964,6 +970,72 @@ def classify_by_rules(text: str) -> str | None:
     return None
 
 
+IMAGE_STORAGE_LIMIT = 50 * 1024 * 1024  # 50MB
+
+
+def _save_image_with_cleanup(collection_id: int, image_bytes: bytes):
+    current = db.get_image_storage_bytes()
+    new_size = len(image_bytes)
+    if current + new_size > IMAGE_STORAGE_LIMIT:
+        db.delete_oldest_images(current + new_size - IMAGE_STORAGE_LIMIT + 1024 * 1024)
+    db.save_image_data(collection_id, image_bytes)
+
+
+def handle_retry_ocr(user_id: str) -> str:
+    pending = db.get_pending_image_collections(user_id)
+    if not pending:
+        return "目前沒有待辨識的圖片。"
+    success = 0
+    fail = 0
+    for item in pending:
+        image_bytes = db.get_image_data(item["id"])
+        if not image_bytes:
+            continue
+        analysis = gemini.analyze_image(image_bytes)
+        is_error = analysis.get("summary", "").startswith("辨識失敗") and "429" in analysis.get("summary", "")
+        if is_error:
+            fail += 1
+            break
+        db.update_collection_text(
+            item["id"],
+            raw_text=analysis.get("ocr_text", ""),
+            title=analysis.get("title", "圖片"),
+            summary=analysis.get("summary", ""),
+        )
+        db.clear_image_data(item["id"])
+        success += 1
+    lines = [f"🔄 重新辨識完成"]
+    if success:
+        lines.append(f"✅ 成功辨識 {success} 張，圖片已清除")
+    if fail:
+        lines.append(f"⚠️ 額度不足，剩餘 {len(pending) - success} 張待辨識")
+    return "\n".join(lines)
+
+
+def handle_edit_collection(user_msg: str, user_id: str) -> str:
+    parts = user_msg.replace("修改收藏", "").strip().split(maxsplit=1)
+    if not parts:
+        return "請輸入：修改收藏 編號 新內容\n例如：修改收藏 5 會議記錄重點摘要"
+    try:
+        cid = int(parts[0])
+    except ValueError:
+        return "編號格式不正確，請輸入數字。例如：修改收藏 5 新內容"
+    item = db.get_collection_by_id(cid, user_id)
+    if not item:
+        return f"找不到編號 {cid} 的收藏，或該收藏不屬於你。"
+    if len(parts) < 2:
+        lines = [f"📋 收藏 #{cid} 目前內容："]
+        lines.append(f"標題：{item['title']}")
+        lines.append(f"摘要：{item['summary']}")
+        if item.get("raw_text"):
+            lines.append(f"原文：{item['raw_text'][:100]}")
+        lines.append("\n請輸入：修改收藏 {編號} {新內容}")
+        return "\n".join(lines)
+    new_text = parts[1]
+    db.update_collection_text(cid, raw_text=new_text, title=new_text[:10], summary=new_text[:50])
+    return f"✅ 收藏 #{cid} 已更新為：{new_text[:50]}"
+
+
 def handle_save_collection(data: dict, user_id: str) -> str:
     content = data.get("content", "")
     if not content:
@@ -991,14 +1063,19 @@ def handle_save_collection(data: dict, user_id: str) -> str:
     category = analysis.get("category", "靈感")
     title = analysis.get("title", content[:10])
     summary = analysis.get("summary", content[:50])
+    key_points = analysis.get("key_points", [])
     source_url = content.strip() if has_url and "\n" not in content.strip() else ""
+
+    stored_summary = summary
+    if key_points:
+        stored_summary = summary + "\n" + "\n".join(f"• {pt}" for pt in key_points[:5])
 
     db.add_collection(
         user_id=user_id,
         content_type="url" if has_url else "text",
         category=category,
         title=title,
-        summary=summary,
+        summary=stored_summary,
         raw_text=content,
         source_url=source_url,
     )
@@ -1008,7 +1085,6 @@ def handle_save_collection(data: dict, user_id: str) -> str:
     if summary:
         lines.append(f"📝 {summary}")
 
-    key_points = analysis.get("key_points", [])
     if key_points:
         lines.append("")
         lines.append("📌 重點：")
@@ -1050,6 +1126,27 @@ def handle_draft_reply(data: dict) -> str:
         return f"草擬回覆時發生錯誤：{type(e).__name__}"
 
 
+def _format_collection_item(item: dict, show_date: bool = True) -> list:
+    emoji = CATEGORY_EMOJI.get(item["category"], "📌")
+    date_str = ""
+    if show_date:
+        date_str = f"（{item['created_at'].strftime('%m/%d')}）" if hasattr(item["created_at"], "strftime") else f"（{str(item['created_at'])[:5]}）"
+    cid = item["id"]
+    lines = [f"{emoji} #{cid} [{item['category']}] {item['title']}{date_str}"]
+    if item.get("summary"):
+        summary_lines = item["summary"].split("\n")
+        first_line = summary_lines[0]
+        lines.append(f"   {first_line[:80]}")
+        for sl in summary_lines[1:6]:
+            if sl.strip():
+                lines.append(f"   {sl.strip()}")
+    if item.get("source_url"):
+        lines.append(f"   🔗 {item['source_url']}")
+    if item.get("has_image"):
+        lines.append("   📷 有暫存圖片（輸入「重新辨識」可補辨識）")
+    return lines
+
+
 def handle_query_collections(data: dict, user_id: str) -> str:
     category = data.get("category", "")
     items = db.get_collections(user_id, category=category)
@@ -1059,15 +1156,13 @@ def handle_query_collections(data: dict, user_id: str) -> str:
         return f"目前沒有{label}收藏"
 
     label = f"「{category}」" if category else "所有"
-    lines = [f"📚 {label}收藏（共 {len(items)} 筆）：", ""]
+    lines = [f"📚 {label}收藏（共 {len(items)} 筆）："]
     for item in items[:15]:
-        emoji = CATEGORY_EMOJI.get(item["category"], "📌")
-        date = item["created_at"].strftime("%m/%d") if hasattr(item["created_at"], "strftime") else str(item["created_at"])[:5]
-        lines.append(f"{emoji} [{item['category']}] {item['title']}（{date}）")
-        if item.get("summary"):
-            lines.append(f"   {item['summary'][:40]}")
+        lines.append("")
+        lines.extend(_format_collection_item(item))
     if len(items) > 15:
         lines.append(f"\n...還有 {len(items) - 15} 筆")
+    lines.append("\n💡 修改：修改收藏 {編號} {新內容}")
     return "\n".join(lines)
 
 
@@ -1084,12 +1179,10 @@ def handle_search_collections(data: dict, user_id: str) -> str:
     if not items:
         return f"找不到與「{display_keyword}」相關的收藏"
 
-    lines = [f"🔍 與「{display_keyword}」相關的收藏（{len(items)} 筆）：", ""]
+    lines = [f"🔍 與「{display_keyword}」相關的收藏（{len(items)} 筆）："]
     for item in items[:10]:
-        emoji = CATEGORY_EMOJI.get(item["category"], "📌")
-        lines.append(f"{emoji} [{item['category']}] {item['title']}")
-        if item.get("summary"):
-            lines.append(f"   {item['summary'][:40]}")
+        lines.append("")
+        lines.extend(_format_collection_item(item, show_date=False))
     return "\n".join(lines)
 
 
@@ -1178,6 +1271,14 @@ def get_help_text() -> str:
 【旅遊規劃】
 • 小助理 幫我規劃花蓮三天兩夜
 • 小助理 7/10出發去台南玩兩天
+
+【收藏管理】（1 對 1 模式）
+• 傳送網址、文字、圖片 → 自動收藏
+• 我的收藏 / 收藏清單
+• 找一下{關鍵字}
+• 修改收藏 {編號} {新內容}
+• 重新辨識（補辨識額度不足時的圖片）
+• 幫我回覆：{對方說的話}（寫作助手）
 
 【其他】
 • 小助理 天氣（查詢天氣預報）

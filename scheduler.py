@@ -162,7 +162,13 @@ def daily_evening_summary():
             lines.append(f"\n{emoji} [{cat}] {item.get('title', '')}")
             summary = item.get("summary", "")
             if summary:
-                lines.append(f"   {summary[:60]}")
+                summary_parts = summary.split("\n")
+                lines.append(f"   {summary_parts[0][:80]}")
+                for sp in summary_parts[1:4]:
+                    if sp.strip():
+                        lines.append(f"   {sp.strip()}")
+            if item.get("source_url"):
+                lines.append(f"   🔗 {item['source_url']}")
             if item.get("status") == "unread" and cat in ("待辦", "帳務", "工作"):
                 need_action.append(item)
 

@@ -117,8 +117,15 @@ class Database:
                     raw_text TEXT NOT NULL DEFAULT '',
                     source_url TEXT DEFAULT '',
                     status TEXT DEFAULT 'unread',
+                    image_data BYTEA,
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
+            """)
+            cur.execute("""
+                DO $$ BEGIN
+                    ALTER TABLE collections ADD COLUMN image_data BYTEA;
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$;
             """)
 
     # ── 行程 ────────────────────────────────────────────
@@ -463,7 +470,10 @@ class Database:
                         status: str = "") -> list:
         with self._get_conn() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            query = "SELECT * FROM collections WHERE user_id = %s"
+            query = ("SELECT id, user_id, content_type, category, title, summary, "
+                     "raw_text, source_url, status, created_at, "
+                     "(image_data IS NOT NULL) AS has_image "
+                     "FROM collections WHERE user_id = %s")
             params = [user_id]
             if category:
                 query += " AND category = %s"
@@ -480,7 +490,10 @@ class Database:
         with self._get_conn() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur.execute(
-                "SELECT * FROM collections WHERE user_id = %s AND created_at::date = %s ORDER BY created_at DESC",
+                "SELECT id, user_id, content_type, category, title, summary, "
+                "raw_text, source_url, status, created_at, "
+                "(image_data IS NOT NULL) AS has_image "
+                "FROM collections WHERE user_id = %s AND created_at::date = %s ORDER BY created_at DESC",
                 (user_id, today),
             )
             return [dict(r) for r in cur.fetchall()]
@@ -497,7 +510,10 @@ class Database:
                 params.extend([f"%{kw}%", f"%{kw}%", f"%{kw}%"])
             where = " OR ".join(conditions)
             cur.execute(
-                f"""SELECT * FROM collections
+                f"""SELECT id, user_id, content_type, category, title, summary,
+                    raw_text, source_url, status, created_at,
+                    (image_data IS NOT NULL) AS has_image
+                    FROM collections
                     WHERE user_id = %s AND ({where})
                     ORDER BY created_at DESC LIMIT 20""",
                 params,
@@ -528,3 +544,97 @@ class Database:
                 (today,),
             )
             return [row[0] for row in cur.fetchall()]
+
+    # ── 圖片暫存 ──────────────────────────────────────────
+
+    def save_image_data(self, collection_id: int, image_bytes: bytes) -> None:
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE collections SET image_data = %s WHERE id = %s",
+                (psycopg2.Binary(image_bytes), collection_id),
+            )
+
+    def clear_image_data(self, collection_id: int) -> None:
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE collections SET image_data = NULL WHERE id = %s",
+                (collection_id,),
+            )
+
+    def get_pending_image_collections(self, user_id: str) -> list:
+        with self._get_conn() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """SELECT id, title, summary, created_at FROM collections
+                   WHERE user_id = %s AND image_data IS NOT NULL
+                   ORDER BY created_at ASC""",
+                (user_id,),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_image_data(self, collection_id: int) -> bytes | None:
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT image_data FROM collections WHERE id = %s",
+                (collection_id,),
+            )
+            row = cur.fetchone()
+            if row and row[0]:
+                return bytes(row[0])
+            return None
+
+    def get_image_storage_bytes(self) -> int:
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COALESCE(SUM(LENGTH(image_data)), 0) FROM collections WHERE image_data IS NOT NULL"
+            )
+            return cur.fetchone()[0]
+
+    def delete_oldest_images(self, free_bytes: int) -> int:
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT id, LENGTH(image_data) as size FROM collections
+                   WHERE image_data IS NOT NULL ORDER BY created_at ASC"""
+            )
+            freed = 0
+            deleted = 0
+            for row in cur.fetchall():
+                if freed >= free_bytes:
+                    break
+                cur.execute("UPDATE collections SET image_data = NULL WHERE id = %s", (row[0],))
+                freed += row[1]
+                deleted += 1
+            return deleted
+
+    def get_collection_by_id(self, collection_id: int, user_id: str) -> dict | None:
+        with self._get_conn() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM collections WHERE id = %s AND user_id = %s",
+                (collection_id, user_id),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def update_collection_text(self, collection_id: int, raw_text: str,
+                               title: str = "", summary: str = "") -> None:
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            fields = ["raw_text = %s"]
+            params = [raw_text]
+            if title:
+                fields.append("title = %s")
+                params.append(title)
+            if summary:
+                fields.append("summary = %s")
+                params.append(summary)
+            params.append(collection_id)
+            cur.execute(
+                f"UPDATE collections SET {', '.join(fields)} WHERE id = %s",
+                params,
+            )
