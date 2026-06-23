@@ -120,7 +120,15 @@ def handle_image_message(event):
         with ApiClient(configuration) as api_client:
             blob_api = MessagingApiBlob(api_client)
             content = blob_api.get_message_content(message_id)
-            image_bytes = content if isinstance(content, bytes) else content.read()
+            if isinstance(content, (bytes, bytearray)):
+                image_bytes = bytes(content)
+            elif hasattr(content, "read"):
+                image_bytes = content.read()
+            elif hasattr(content, "content"):
+                image_bytes = content.content
+            else:
+                image_bytes = bytes(content)
+            print(f"[Image] Downloaded {len(image_bytes)} bytes for message {message_id}")
 
         analysis = gemini.analyze_image(image_bytes)
 
@@ -771,7 +779,7 @@ def fetch_url_content(url: str) -> dict:
 
 CATEGORY_EMOJI = {
     "待讀": "📖", "待辦": "✅", "靈感": "💡",
-    "帳務": "💰", "工作": "💼", "家庭": "🏠",
+    "帳務": "💰", "工作": "💼", "家庭": "🏠", "工具箱": "🧰",
 }
 
 
