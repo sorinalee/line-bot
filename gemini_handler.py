@@ -20,11 +20,13 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
    注意：recurrence 只在使用者明確表示「每週」「每天」「每月」時才填寫。一般行程 recurrence 留空字串。
 
 2. **query_events** — 查詢行程
-   - 「今天有什麼事」→ {"action": "query_events", "data": {"days": 1}}
-   - 「這週行程」→ {"action": "query_events", "data": {"days": 7}}
-   - 「明天的行程」→ {"action": "query_events", "data": {"days": 2}}
-   - 「未來三天」→ {"action": "query_events", "data": {"days": 3}}
-   注意：days 最小值為 1，代表「今天」。不要回傳 days: 0。
+   - 「今天有什麼事」→ {"action": "query_events", "data": {"days": 1, "target_date": ""}}
+   - 「這週行程」→ {"action": "query_events", "data": {"days": 7, "target_date": ""}}
+   - 「明天的行程」→ {"action": "query_events", "data": {"days": 2, "target_date": ""}}
+   - 「未來三天」→ {"action": "query_events", "data": {"days": 3, "target_date": ""}}
+   - 「6月30日的行程」→ {"action": "query_events", "data": {"days": 0, "target_date": "2026-06-30"}}
+   - 「下週五有什麼事」→ {"action": "query_events", "data": {"days": 0, "target_date": "2026-06-27"}}
+   注意：如果使用者問的是特定某一天，用 target_date（YYYY-MM-DD），days 設 0。如果問的是一段期間（「這週」「未來三天」），用 days，target_date 留空。days 最小值為 1，代表「今天」。
 
 3. **search_events** — 搜尋歷史行程（查過去做過什麼、哪天去過哪裡）
    - 「我哪天看過牙醫？」→ {"action": "search_events", "data": {"keyword": "牙醫"}}

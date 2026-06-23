@@ -269,6 +269,21 @@ def handle_add_event(data: dict, group_id: str, user_id: str) -> str:
 
 
 def handle_query_events(data: dict, group_id: str) -> str:
+    target_date = data.get("target_date", "")
+
+    if target_date:
+        normalized = normalize_date(target_date)
+        if not normalized:
+            normalized = target_date
+        events = db.get_events_by_date(group_id, normalized)
+        label = normalized
+        if not events:
+            return f"📅 {label} 沒有行程"
+        lines = [f"📅 {label} 的行程：", ""]
+        for e in events:
+            lines.append(f"• {e['datetime']}  {e['title']}")
+        return "\n".join(lines)
+
     days = data.get("days", 7)
     events = db.get_upcoming_events(group_id, days=days)
 

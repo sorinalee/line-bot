@@ -129,6 +129,16 @@ class Database:
             )
             return [dict(r) for r in cur.fetchall()]
 
+    def get_events_by_date(self, group_id: str, date_str: str) -> list:
+        """取得特定日期的行程"""
+        with self._get_conn() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM events WHERE group_id = %s AND archived = FALSE AND datetime LIKE %s ORDER BY datetime ASC",
+                (group_id, f"{date_str}%"),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
     def get_all_events(self, group_id: str) -> list:
         """取得所有未歸檔行程"""
         with self._get_conn() as conn:
