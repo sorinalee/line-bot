@@ -92,8 +92,12 @@ def handle_message(event):
     elif user_msg in ["debug", "偵錯", "檢查資料"]:
         result = handle_debug(group_id)
     else:
-        result = process_with_gemini(user_msg, group_id, user_id,
-                                     is_private=not is_group)
+        # 嘗試用關鍵字快速匹配，省下 Gemini 呼叫
+        result = try_keyword_shortcut(user_msg, group_id, user_id,
+                                       is_private=not is_group)
+        if result is None:
+            result = process_with_gemini(user_msg, group_id, user_id,
+                                         is_private=not is_group)
 
     # 回覆
     with ApiClient(configuration) as api_client:
@@ -177,6 +181,45 @@ def handle_image_message(event):
                 messages=[TextMessage(text=result)],
             )
         )
+
+
+# ── 關鍵字快速匹配（不經 Gemini）──────────────────────────
+def try_keyword_shortcut(user_msg: str, group_id: str, user_id: str,
+                         is_private: bool = False) -> str | None:
+    """嘗試用關鍵字快速匹配常用指令，匹配到回傳結果，否則回傳 None"""
+    msg = user_msg.strip()
+
+    # 查詢類
+    if msg in ["今天行程", "今天有什麼事", "今天有什麼行程"]:
+        return handle_query_events({"days": 1, "target_date": ""}, group_id)
+    if msg in ["這週行程", "本週行程"]:
+        return handle_query_events({"days": 7, "target_date": ""}, group_id)
+    if msg in ["待辦", "待辦事項", "我的待辦"]:
+        return handle_query_todos(group_id)
+    if msg in ["購物清單", "要買什麼"]:
+        return handle_query_shopping(group_id)
+    if msg in ["總覽", "目前狀態"]:
+        return handle_summary(group_id)
+    if msg in ["生日", "生日清單"]:
+        return handle_query_birthdays(group_id)
+    if msg in ["天氣", "今天天氣"]:
+        return get_weather("")
+
+    # 收藏類（僅 1 對 1）
+    if is_private:
+        if msg in ["我的收藏", "收藏清單", "收藏"]:
+            return handle_query_collections({"category": ""}, user_id)
+        if msg in ["今天收藏了什麼", "今天的收藏"]:
+            items = db.get_today_collections(user_id)
+            if not items:
+                return "今天還沒有收藏任何東西"
+            lines = [f"📚 今日收藏（{len(items)} 筆）：", ""]
+            for item in items:
+                emoji = CATEGORY_EMOJI.get(item["category"], "📌")
+                lines.append(f"{emoji} [{item['category']}] {item['title']}")
+            return "\n".join(lines)
+
+    return None
 
 
 # ── Gemini 意圖解析 + 執行 ──────────────────────────────
