@@ -79,6 +79,34 @@ def _to_message(result, is_group: bool = True):
     return line_ui.make_text_message(str(result), is_group)
 
 
+def _flex_to_text(flex_msg) -> str:
+    """從 FlexMessage 提取可讀文字；若能解析 JSON 就組合，否則用 alt_text"""
+    try:
+        import json
+        raw = flex_msg.contents.to_dict() if hasattr(flex_msg.contents, "to_dict") else {}
+        texts = []
+        _extract_texts(raw, texts)
+        if texts:
+            return "\n".join(texts)
+    except Exception:
+        pass
+    return flex_msg.alt_text or "操作完成"
+
+
+def _extract_texts(node, out: list, depth=0):
+    """遞迴從 Flex dict 取出所有 text 節點"""
+    if depth > 10:
+        return
+    if isinstance(node, dict):
+        if node.get("type") == "text" and node.get("text"):
+            out.append(node["text"])
+        for v in node.values():
+            _extract_texts(v, out, depth + 1)
+    elif isinstance(node, list):
+        for item in node:
+            _extract_texts(item, out, depth + 1)
+
+
 def send_reply(reply_token: str, target_id: str, result, is_group: bool = True):
     """先嘗試用 reply（免費），失敗則改用 push，Flex 失敗再降級純文字"""
     msg = _to_message(result, is_group)
@@ -104,10 +132,9 @@ def send_reply(reply_token: str, target_id: str, result, is_group: bool = True):
             return
         except Exception as e:
             print(f"[send_reply] push failed: {e}")
-        # Flex Message 失敗時降級為純文字
         if isinstance(msg, FlexMessage):
-            fallback_text = msg.alt_text or "操作完成"
-            print(f"[send_reply] Flex failed, falling back to text: {fallback_text}")
+            fallback_text = _flex_to_text(msg)
+            print(f"[send_reply] Flex failed, falling back to text")
             fallback_msg = line_ui.make_text_message(fallback_text, is_group)
             try:
                 messaging_api.push_message(
@@ -195,9 +222,7 @@ def handle_message(event):
         except Exception as e:
             print(f"[Reply Error] {type(e).__name__}: {e}")
             try:
-                fallback = str(quick_result) if not isinstance(quick_result, str) else quick_result
-                if isinstance(quick_result, FlexMessage):
-                    fallback = quick_result.alt_text or "請重新操作"
+                fallback = _flex_to_text(quick_result) if isinstance(quick_result, FlexMessage) else str(quick_result)
                 with ApiClient(configuration) as api_client:
                     messaging_api = MessagingApi(api_client)
                     messaging_api.push_message(
@@ -1229,14 +1254,32 @@ def handle_save_collection(data: dict, user_id: str) -> str:
     if analysis.get("action_needed"):
         extra_info.append(f"👉 {analysis['action_needed']}")
 
-    return line_ui.build_save_confirmation_flex(
-        category=category,
-        title=title,
-        summary=summary,
-        key_points=key_points,
-        source_url=source_url,
-        extra_info=extra_info,
-    )
+    emoji = CATEGORY_EMOJI.get(category, "📌")
+    try:
+        flex = line_ui.build_save_confirmation_flex(
+            category=category,
+            title=title,
+            summary=summary,
+            key_points=key_points,
+            source_url=source_url,
+            extra_info=extra_info,
+        )
+        if flex:
+            return flex
+    except Exception as e:
+        print(f"[Save Flex Build Error] {type(e).__name__}: {e}")
+
+    lines = [f"{emoji} 已收藏 → {category}", f"📋 {title}"]
+    if summary:
+        lines.append(summary[:100])
+    if key_points:
+        for pt in key_points[:3]:
+            lines.append(f"• {pt}")
+    if source_url:
+        lines.append(f"🔗 {source_url}")
+    for info in extra_info:
+        lines.append(info)
+    return "\n".join(lines)
 
 
 def handle_draft_reply(data: dict) -> str:
@@ -1292,17 +1335,14 @@ def handle_query_collections(data: dict, user_id: str):
         return f"目前沒有{label}收藏"
 
     label = f"「{category}」" if category else "我的收藏"
-    flex = line_ui.build_collection_flex(items, label)
-    if flex:
-        return flex
+    try:
+        flex = line_ui.build_collection_flex(items, label)
+        if flex:
+            return flex
+    except Exception as e:
+        print(f"[Flex Build Error] {type(e).__name__}: {e}")
 
-    lines = [f"📚 {label}（共 {len(items)} 筆）："]
-    for item in items[:15]:
-        lines.append("")
-        lines.extend(_format_collection_item(item))
-    if len(items) > 15:
-        lines.append(f"\n...還有 {len(items) - 15} 筆")
-    return "\n".join(lines)
+    return line_ui.build_collection_text(items, label)
 
 
 def handle_search_collections(data: dict, user_id: str):

@@ -2,6 +2,9 @@
 LINE UI 模組 — Quick Reply + Flex Message 建構器
 """
 
+import re
+from urllib.parse import quote, urlparse
+
 from linebot.v3.messaging import (
     FlexMessage,
     FlexContainer,
@@ -11,6 +14,32 @@ from linebot.v3.messaging import (
     URIAction,
     TextMessage,
 )
+
+
+def _safe_uri(url: str) -> str | None:
+    """驗證並清理 URL，不合規回傳 None"""
+    if not url:
+        return None
+    url = url.strip()
+    if not url.startswith(("http://", "https://", "line://")):
+        return None
+    try:
+        parsed = urlparse(url)
+        if not parsed.netloc:
+            return None
+        if not all(ord(c) < 128 for c in parsed.netloc):
+            return url[:1000] if len(url) <= 1000 else None
+        uri_safe = "/:@!$&()*+,;=-._~"
+        safe = f"{parsed.scheme}://{parsed.netloc}{quote(parsed.path, safe=uri_safe)}"
+        if parsed.query:
+            safe += "?" + quote(parsed.query, safe=uri_safe + "?=&")
+        if parsed.fragment:
+            safe += "#" + quote(parsed.fragment, safe=uri_safe)
+        if len(safe) > 1000:
+            return None
+        return safe
+    except Exception:
+        return None
 
 # ── 分類配色 ─────────────────────────────────────────────
 CATEGORY_COLORS = {
@@ -158,35 +187,27 @@ def _collection_bubble(item: dict) -> dict:
     }
 
     footer_buttons = []
-    if source_url:
+    safe_url = _safe_uri(source_url)
+    if safe_url:
         footer_buttons.append({
             "type": "button",
-            "action": {"type": "uri", "label": "開啟連結", "uri": source_url},
+            "action": {"type": "uri", "label": "開啟連結", "uri": safe_url},
             "style": "primary",
             "height": "sm",
             "color": color,
         })
     footer_buttons.append({
-        "type": "box",
-        "layout": "horizontal",
-        "contents": [
-            {
-                "type": "button",
-                "action": {"type": "message", "label": f"修改 #{cid}", "text": f"修改收藏 {cid}"},
-                "style": "secondary",
-                "height": "sm",
-                "flex": 1,
-            },
-            {
-                "type": "button",
-                "action": {"type": "message", "label": f"刪除 #{cid}", "text": f"刪除收藏 {cid}"},
-                "style": "secondary",
-                "height": "sm",
-                "color": "#E74C3C",
-                "flex": 1,
-            },
-        ],
-        "spacing": "sm",
+        "type": "button",
+        "action": {"type": "message", "label": f"修改 #{cid}", "text": f"修改收藏 {cid}"},
+        "style": "link",
+        "height": "sm",
+    })
+    footer_buttons.append({
+        "type": "button",
+        "action": {"type": "message", "label": f"刪除 #{cid}", "text": f"刪除收藏 {cid}"},
+        "style": "link",
+        "height": "sm",
+        "color": "#E74C3C",
     })
 
     bubble["footer"] = {
@@ -216,6 +237,29 @@ def build_collection_flex(items: list, title: str = "我的收藏") -> FlexMessa
         contents=FlexContainer.from_dict(container),
         quick_reply=build_quick_reply(is_group=False),
     )
+
+
+def build_collection_text(items: list, title: str = "我的收藏") -> str:
+    """Flex 失敗時的純文字收藏清單"""
+    lines = [f"📚 {title}（共 {len(items)} 筆）"]
+    for item in items[:10]:
+        cat = item.get("category") or "未分類"
+        emoji = CATEGORY_EMOJI.get(cat, "📌")
+        cid = item.get("id") or 0
+        t = (item.get("title") or "（無標題）")[:30]
+        lines.append(f"\n{emoji} #{cid} [{cat}] {t}")
+        summary = item.get("summary") or ""
+        if summary:
+            first = summary.split("\n")[0][:60]
+            lines.append(f"   {first}")
+        url = item.get("source_url") or ""
+        if url:
+            lines.append(f"   🔗 {url}")
+        lines.append(f"   → 輸入「刪除收藏 {cid}」可刪除")
+    if len(items) > 10:
+        lines.append(f"\n...還有 {len(items) - 10} 筆")
+    lines.append("\n💡 輸入「清空收藏」可刪除全部")
+    return "\n".join(lines)
 
 
 # ── Flex: 收藏儲存確認 ───────────────────────────────────
@@ -313,13 +357,14 @@ def build_save_confirmation_flex(category: str, title: str, summary: str,
         },
     }
 
-    if source_url:
+    safe_url = _safe_uri(source_url)
+    if safe_url:
         bubble["footer"] = {
             "type": "box",
             "layout": "vertical",
             "contents": [{
                 "type": "button",
-                "action": {"type": "uri", "label": "開啟連結", "uri": source_url},
+                "action": {"type": "uri", "label": "開啟連結", "uri": safe_url},
                 "style": "primary",
                 "height": "sm",
                 "color": color,
