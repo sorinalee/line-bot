@@ -259,8 +259,9 @@ class GeminiHandler:
                 result_text = result_text.rsplit("```", 1)[0]
             return json.loads(result_text.strip())
         except Exception as e:
-            print(f"[Gemini Collection Error] {type(e).__name__}: {e}")
-            return {"category": "靈感", "title": text[:10], "summary": text[:50],
+            err_msg = f"{type(e).__name__}: {str(e)[:80]}"
+            print(f"[Gemini Collection Error] {err_msg}")
+            return {"category": "靈感", "title": text[:10], "summary": f"分析失敗（{err_msg}）",
                     "has_deadline": False, "deadline_date": "",
                     "has_amount": False, "amount": "", "action_needed": ""}
 
@@ -280,8 +281,9 @@ class GeminiHandler:
                 result_text = result_text.rsplit("```", 1)[0]
             return json.loads(result_text.strip())
         except Exception as e:
-            print(f"[Gemini Image Error] {type(e).__name__}: {e}")
-            return {"category": "靈感", "title": "圖片", "summary": "無法辨識圖片內容",
+            err_msg = f"{type(e).__name__}: {str(e)[:80]}"
+            print(f"[Gemini Image Error] {err_msg}")
+            return {"category": "靈感", "title": "圖片", "summary": f"辨識失敗（{err_msg}）",
                     "ocr_text": "", "has_deadline": False, "deadline_date": "",
                     "has_amount": False, "amount": "", "action_needed": ""}
 
