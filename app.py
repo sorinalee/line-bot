@@ -20,7 +20,9 @@ from linebot.v3.messaging import (
     MessagingApi,
     MessagingApiBlob,
     ReplyMessageRequest,
+    PushMessageRequest,
     TextMessage,
+    FlexMessage,
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, ImageMessageContent
 from linebot.v3.exceptions import InvalidSignatureError
@@ -30,6 +32,7 @@ from gemini_handler import GeminiHandler
 from weather_handler import get_weather
 from exchange_handler import get_exchange_rate
 from scheduler import start_scheduler
+import line_ui
 
 # ── 時區設定 ─────────────────────────────────────────────
 TW = timezone(timedelta(hours=8))
@@ -69,23 +72,30 @@ def callback():
 
 
 # ── 共用回覆函式 ───────────────────────────────────────────
-def send_reply(reply_token: str, target_id: str, text: str):
+def _to_message(result, is_group: bool = True):
+    """str → TextMessage with QuickReply, Message 物件直接回傳"""
+    if isinstance(result, (TextMessage, FlexMessage)):
+        return result
+    return line_ui.make_text_message(str(result), is_group)
+
+
+def send_reply(reply_token: str, target_id: str, result, is_group: bool = True):
     """先嘗試用 reply（免費），失敗則改用 push"""
+    msg = _to_message(result, is_group)
     with ApiClient(configuration) as api_client:
         messaging_api = MessagingApi(api_client)
         try:
             messaging_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=reply_token,
-                    messages=[TextMessage(text=text)],
+                    messages=[msg],
                 )
             )
         except Exception:
-            from linebot.v3.messaging import PushMessageRequest
             messaging_api.push_message(
                 PushMessageRequest(
                     to=target_id,
-                    messages=[TextMessage(text=text)],
+                    messages=[msg],
                 )
             )
 
@@ -110,8 +120,10 @@ def handle_message(event):
                 break
     # 1 對 1 模式：直接處理，不需要觸發詞
 
+    is_private = not is_group
+
     # 檢查是否有待補備註的圖片收藏
-    if not is_group and user_id in _pending_image_memo:
+    if is_private and user_id in _pending_image_memo:
         collection_id = _pending_image_memo.pop(user_id)
         if user_msg in ["跳過", "不用", "算了", "skip"]:
             reply_text = "好的，已跳過備註。"
@@ -131,7 +143,7 @@ def handle_message(event):
             messaging_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[TextMessage(text=reply_text)],
+                    messages=[_to_message(reply_text, is_group)],
                 )
             )
         return
@@ -144,7 +156,7 @@ def handle_message(event):
         quick_result = handle_debug(group_id)
     else:
         quick_result = try_keyword_shortcut(user_msg, group_id, user_id,
-                                             is_private=not is_group)
+                                             is_private=is_private)
 
     if quick_result is not None:
         with ApiClient(configuration) as api_client:
@@ -152,7 +164,7 @@ def handle_message(event):
             messaging_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[TextMessage(text=quick_result)],
+                    messages=[_to_message(quick_result, is_group)],
                 )
             )
         return
@@ -164,8 +176,8 @@ def handle_message(event):
     def _process():
         try:
             result = process_with_gemini(user_msg, group_id, user_id,
-                                         is_private=not is_group)
-            send_reply(reply_token, target_id, result)
+                                         is_private=is_private)
+            send_reply(reply_token, target_id, result, is_group)
         except Exception as e:
             print(f"[Background Error] {type(e).__name__}: {e}")
 
@@ -249,7 +261,7 @@ def handle_image_message(event):
             print(f"[Image Handler Error] {type(e).__name__}: {e}")
             result = f"圖片處理失敗：{type(e).__name__}"
 
-        send_reply(reply_token, user_id, result)
+        send_reply(reply_token, user_id, result, is_group=False)
 
     threading.Thread(target=_process_image, daemon=True).start()
 
@@ -260,17 +272,19 @@ def try_keyword_shortcut(user_msg: str, group_id: str, user_id: str,
     """嘗試用關鍵字快速匹配常用指令，匹配到回傳結果，否則回傳 None"""
     msg = user_msg.strip()
 
+    is_group = not is_private
+
     # 查詢類
     if msg in ["今天行程", "今天有什麼事", "今天有什麼行程"]:
-        return handle_query_events({"days": 1, "target_date": ""}, group_id)
+        return handle_query_events({"days": 1, "target_date": ""}, group_id, is_group)
     if msg in ["這週行程", "本週行程"]:
-        return handle_query_events({"days": 7, "target_date": ""}, group_id)
+        return handle_query_events({"days": 7, "target_date": ""}, group_id, is_group)
     if msg in ["待辦", "待辦事項", "我的待辦"]:
-        return handle_query_todos(group_id)
+        return handle_query_todos(group_id, is_group)
     if msg in ["購物清單", "要買什麼"]:
-        return handle_query_shopping(group_id)
+        return handle_query_shopping(group_id, is_group)
     if msg in ["總覽", "目前狀態"]:
-        return handle_summary(group_id)
+        return handle_summary(group_id, is_group)
     if msg in ["生日", "生日清單"]:
         return handle_query_birthdays(group_id)
     if msg in ["天氣", "今天天氣"]:
@@ -284,6 +298,9 @@ def try_keyword_shortcut(user_msg: str, group_id: str, user_id: str,
             items = db.get_today_collections(user_id)
             if not items:
                 return "今天還沒有收藏任何東西"
+            flex = line_ui.build_collection_flex(items, "今日收藏")
+            if flex:
+                return flex
             lines = [f"📚 今日收藏（{len(items)} 筆）：", ""]
             for item in items:
                 emoji = CATEGORY_EMOJI.get(item["category"], "📌")
@@ -348,7 +365,7 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str,
         if action == "add_event":
             return handle_add_event(data, group_id, user_id)
         elif action == "query_events":
-            return handle_query_events(data, group_id)
+            return handle_query_events(data, group_id, not is_private)
         elif action == "search_events":
             return handle_search_events(data, group_id)
         elif action == "delete_event":
@@ -360,7 +377,7 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str,
         elif action == "complete_todo":
             return handle_complete_todo(data, group_id)
         elif action == "query_todos":
-            return handle_query_todos(group_id)
+            return handle_query_todos(group_id, not is_private)
         elif action == "delete_todo":
             return handle_delete_todo(data, group_id)
         elif action == "query_weather":
@@ -371,7 +388,7 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str,
         elif action == "complete_shopping":
             return handle_complete_shopping(data, group_id)
         elif action == "query_shopping":
-            return handle_query_shopping(group_id)
+            return handle_query_shopping(group_id, not is_private)
         elif action == "delete_shopping":
             return handle_delete_shopping(data, group_id)
         elif action == "clear_shopping":
@@ -397,7 +414,7 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str,
         elif action == "draft_reply":
             return handle_draft_reply(data)
         elif action == "summary":
-            return handle_summary(group_id)
+            return handle_summary(group_id, not is_private)
         elif action == "chat":
             return intent_json.get("reply", "好的，收到！")
         else:
@@ -487,7 +504,7 @@ def handle_add_event(data: dict, group_id: str, user_id: str) -> str:
     return reply
 
 
-def handle_query_events(data: dict, group_id: str) -> str:
+def handle_query_events(data: dict, group_id: str, is_group: bool = True):
     target_date = data.get("target_date", "")
 
     if target_date:
@@ -498,6 +515,9 @@ def handle_query_events(data: dict, group_id: str) -> str:
         label = normalized
         if not events:
             return f"📅 {label} 沒有行程"
+        flex = line_ui.build_events_flex(events, label, is_group)
+        if flex:
+            return flex
         lines = [f"📅 {label} 的行程：", ""]
         for e in events:
             lines.append(f"• {e['datetime']}  {e['title']}")
@@ -516,6 +536,9 @@ def handle_query_events(data: dict, group_id: str) -> str:
     if not events:
         return f"{label}沒有行程，盡情放鬆吧 🎉"
 
+    flex = line_ui.build_events_flex(events, label, is_group)
+    if flex:
+        return flex
     lines = [f"📅 {label}的行程：", ""]
     for e in events:
         lines.append(f"• {e['datetime']}  {e['title']}")
@@ -606,11 +629,14 @@ def handle_complete_todo(data: dict, group_id: str) -> str:
     return f"找不到包含「{keyword}」的待辦事項"
 
 
-def handle_query_todos(group_id: str) -> str:
+def handle_query_todos(group_id: str, is_group: bool = True):
     todos = db.get_todos(group_id, status="pending")
     if not todos:
         return "目前沒有待辦事項，太棒了！🎉"
 
+    flex = line_ui.build_todos_flex(todos, is_group)
+    if flex:
+        return flex
     lines = ["📋 待辦清單：", ""]
     for i, t in enumerate(todos, 1):
         lines.append(f"  {i}. ☐ {t['title']}")
@@ -628,39 +654,34 @@ def handle_delete_todo(data: dict, group_id: str) -> str:
     return f"找不到包含「{keyword}」的待辦事項"
 
 
-def handle_summary(group_id: str) -> str:
+def handle_summary(group_id: str, is_group: bool = True):
     events = db.get_upcoming_events(group_id, days=3)
     todos = db.get_todos(group_id, status="pending")
     shopping = db.get_shopping_list(group_id, status="pending")
 
-    lines = ["📊 目前狀態總覽", ""]
+    if not events and not todos and not shopping:
+        return "目前沒有行程、待辦、購物清單，一切清爽！✨"
 
+    flex = line_ui.build_summary_flex(events, todos, shopping, is_group)
+    if flex:
+        return flex
+
+    lines = ["📊 目前狀態總覽", ""]
     if events:
         lines.append("【近三天行程】")
         for e in events:
-            recur = f" 🔁" if e.get("recurrence") else ""
+            recur = " 🔁" if e.get("recurrence") else ""
             lines.append(f"  📅 {e['datetime']}  {e['title']}{recur}")
         lines.append("")
-
     if todos:
         lines.append(f"【待辦事項】（{len(todos)} 項）")
         for t in todos:
             lines.append(f"  ☐ {t['title']}")
         lines.append("")
-    else:
-        lines.append("【待辦事項】全部完成！🎉")
-        lines.append("")
-
     if shopping:
         lines.append(f"【購物清單】（{len(shopping)} 項）")
         for s in shopping:
             lines.append(f"  🛒 {s['item']}")
-    else:
-        lines.append("【購物清單】沒有待買項目")
-
-    if not events and not todos and not shopping:
-        return "目前沒有行程、待辦、購物清單，一切清爽！✨"
-
     return "\n".join(lines)
 
 
@@ -693,11 +714,14 @@ def handle_complete_shopping(data: dict, group_id: str) -> str:
     return f"購物清單中找不到「{keyword}」"
 
 
-def handle_query_shopping(group_id: str) -> str:
+def handle_query_shopping(group_id: str, is_group: bool = True):
     pending = db.get_shopping_list(group_id, status="pending")
     if not pending:
         return "購物清單是空的，不需要買東西 🎉"
 
+    flex = line_ui.build_shopping_flex(pending, is_group)
+    if flex:
+        return flex
     lines = ["🛒 購物清單：", ""]
     for i, s in enumerate(pending, 1):
         lines.append(f"  {i}. ☐ {s['item']}")
@@ -1080,27 +1104,25 @@ def handle_save_collection(data: dict, user_id: str) -> str:
         source_url=source_url,
     )
 
-    emoji = CATEGORY_EMOJI.get(category, "📌")
-    lines = [f"{emoji} 已收藏 → {category}", f"📋 {title}"]
-    if summary:
-        lines.append(f"📝 {summary}")
-
-    if key_points:
-        lines.append("")
-        lines.append("📌 重點：")
-        for pt in key_points[:5]:
-            lines.append(f"  • {pt}")
-
+    extra_info = []
     if analysis.get("has_deadline") and analysis.get("deadline_date"):
         deadline = analysis["deadline_date"]
-        lines.append(f"⏰ 截止日：{deadline}")
+        extra_info.append(f"⏰ 截止日：{deadline}")
         db.add_event(user_id, user_id, f"[截止] {title}", deadline)
-        lines.append("→ 已自動加入行程提醒")
-
+        extra_info.append("→ 已自動加入行程提醒")
+    if analysis.get("has_amount") and analysis.get("amount"):
+        extra_info.append(f"💰 金額：{analysis['amount']}")
     if analysis.get("action_needed"):
-        lines.append(f"👉 {analysis['action_needed']}")
+        extra_info.append(f"👉 {analysis['action_needed']}")
 
-    return "\n".join(lines)
+    return line_ui.build_save_confirmation_flex(
+        category=category,
+        title=title,
+        summary=summary,
+        key_points=key_points,
+        source_url=source_url,
+        extra_info=extra_info,
+    )
 
 
 def handle_draft_reply(data: dict) -> str:
@@ -1147,7 +1169,7 @@ def _format_collection_item(item: dict, show_date: bool = True) -> list:
     return lines
 
 
-def handle_query_collections(data: dict, user_id: str) -> str:
+def handle_query_collections(data: dict, user_id: str):
     category = data.get("category", "")
     items = db.get_collections(user_id, category=category)
 
@@ -1155,18 +1177,21 @@ def handle_query_collections(data: dict, user_id: str) -> str:
         label = f"「{category}」類的" if category else ""
         return f"目前沒有{label}收藏"
 
-    label = f"「{category}」" if category else "所有"
-    lines = [f"📚 {label}收藏（共 {len(items)} 筆）："]
+    label = f"「{category}」" if category else "我的收藏"
+    flex = line_ui.build_collection_flex(items, label)
+    if flex:
+        return flex
+
+    lines = [f"📚 {label}（共 {len(items)} 筆）："]
     for item in items[:15]:
         lines.append("")
         lines.extend(_format_collection_item(item))
     if len(items) > 15:
         lines.append(f"\n...還有 {len(items) - 15} 筆")
-    lines.append("\n💡 修改：修改收藏 {編號} {新內容}")
     return "\n".join(lines)
 
 
-def handle_search_collections(data: dict, user_id: str) -> str:
+def handle_search_collections(data: dict, user_id: str):
     keywords = data.get("keywords", [])
     if not keywords:
         keyword = data.get("keyword", "")
@@ -1178,6 +1203,10 @@ def handle_search_collections(data: dict, user_id: str) -> str:
     items = db.search_collections(user_id, keywords)
     if not items:
         return f"找不到與「{display_keyword}」相關的收藏"
+
+    flex = line_ui.build_collection_flex(items, f"搜尋：{display_keyword}")
+    if flex:
+        return flex
 
     lines = [f"🔍 與「{display_keyword}」相關的收藏（{len(items)} 筆）："]
     for item in items[:10]:
