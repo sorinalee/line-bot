@@ -108,7 +108,21 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
     注意：start_date 必須是 YYYY-MM-DD 格式。如果使用者沒有指定出發日期，start_date 留空字串 ""。
     preferences 放使用者提到的偏好（美食、親子、文青、購物等），沒有就留空字串。
 
-22. **chat** — 一般閒聊或無法歸類
+22. **save_collection** — 使用者轉貼內容要你幫忙收藏（只在 1 對 1 中使用）
+    - 當訊息是一段轉貼的文字、網址、或看起來是從別處複製過來的內容
+    - 「幫我存這個」「記一下」+ 內容 → save_collection
+    - 直接丟一個網址（https://...）→ save_collection
+    回傳：{"action": "save_collection", "data": {"content": "使用者的原始內容"}}
+    注意：如果使用者只是丟一段文字或網址，沒有明確要做其他事（不是新增行程、待辦等），在 1 對 1 模式下判斷為 save_collection
+
+23. **query_collections** — 查看收藏清單
+    - 「我的收藏」「今天收藏了什麼」→ {"action": "query_collections", "data": {"category": ""}}
+    - 「看帳務的收藏」→ {"action": "query_collections", "data": {"category": "帳務"}}
+
+24. **search_collections** — 搜尋收藏
+    - 「找一下之前存的停車費」→ {"action": "search_collections", "data": {"keyword": "停車費"}}
+
+25. **chat** — 一般閒聊或無法歸類
     回傳：{"action": "chat", "reply": "你的回覆內容"}
 
 ## 旅遊規劃 vs 一般聊天的判斷規則
@@ -145,7 +159,61 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
 - 查詢今天行程時 days 必須為 1，不可為 0
 - 如果是 chat，reply 請用親切口語的繁體中文回覆，簡短就好
 - 如果使用者問天氣、時事等你有能力回答的問題，用 chat 回覆即可
+- 「我的收藏」「收藏清單」「今天收藏了什麼」是 query_collections
+- 「找一下之前存的…」「有沒有關於…的收藏」是 search_collections
 """
+
+
+COLLECTION_PROMPT = """你是一個個人助理，使用者轉貼了以下內容給你。
+請分析內容並回傳 JSON：
+
+{
+  "category": "待讀/待辦/靈感/帳務/工作/家庭",
+  "title": "簡短標題（10字以內）",
+  "summary": "重點摘要（50字以內）",
+  "has_deadline": true/false,
+  "deadline_date": "YYYY-MM-DD 或空字串",
+  "has_amount": true/false,
+  "amount": "金額文字或空字串",
+  "action_needed": "需要使用者做的事，沒有就空字串"
+}
+
+分類規則：
+- 文章/新聞/教學連結 → 待讀
+- 需要做的事、提醒 → 待辦
+- 點子、想法、值得記住的 → 靈感
+- 帳單、繳費、收據、發票 → 帳務
+- 工作相關（會議、專案、公文） → 工作
+- 家庭相關（學校、家務、親友） → 家庭
+- 如果內容不明確，用「靈感」
+
+只回傳 JSON，不要有其他文字。"""
+
+
+IMAGE_ANALYSIS_PROMPT = """你是一個個人助理，使用者傳了一張圖片給你。
+請仔細辨識圖片內容，回傳 JSON：
+
+{
+  "category": "待讀/待辦/靈感/帳務/工作/家庭",
+  "title": "簡短標題（10字以內）",
+  "summary": "重點摘要（50字以內）",
+  "ocr_text": "圖片中辨識出的重要文字（日期、金額、聯絡方式等）",
+  "has_deadline": true/false,
+  "deadline_date": "YYYY-MM-DD 或空字串",
+  "has_amount": true/false,
+  "amount": "金額文字或空字串",
+  "action_needed": "需要使用者做的事，沒有就空字串"
+}
+
+分類規則：
+- 帳單、繳費單、收據、發票 → 帳務
+- 會議白板、工作文件、公文 → 工作
+- 名片 → 工作（摘要中列出姓名、電話、email）
+- 學校通知、家庭文件 → 家庭
+- 文章截圖 → 待讀
+- 其他 → 靈感
+
+只回傳 JSON，不要有其他文字。"""
 
 
 class GeminiHandler:
@@ -158,6 +226,45 @@ class GeminiHandler:
             )
         else:
             self.model = None
+
+    def analyze_collection(self, text: str) -> dict:
+        """分析轉貼的文字/網址內容，回傳分類和摘要"""
+        if not self.model:
+            return {"error": "Gemini API 尚未設定"}
+        try:
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            response = model.generate_content(f"{COLLECTION_PROMPT}\n\n內容：\n{text}")
+            result_text = response.text.strip()
+            if result_text.startswith("```"):
+                result_text = result_text.split("\n", 1)[-1]
+            if result_text.endswith("```"):
+                result_text = result_text.rsplit("```", 1)[0]
+            return json.loads(result_text.strip())
+        except Exception as e:
+            print(f"[Gemini Collection Error] {type(e).__name__}: {e}")
+            return {"category": "靈感", "title": text[:10], "summary": text[:50],
+                    "has_deadline": False, "deadline_date": "",
+                    "has_amount": False, "amount": "", "action_needed": ""}
+
+    def analyze_image(self, image_bytes: bytes) -> dict:
+        """分析圖片內容（OCR + 分類），回傳分類和摘要"""
+        if not self.model:
+            return {"error": "Gemini API 尚未設定"}
+        try:
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            image_part = {"mime_type": "image/jpeg", "data": image_bytes}
+            response = model.generate_content([IMAGE_ANALYSIS_PROMPT, image_part])
+            result_text = response.text.strip()
+            if result_text.startswith("```"):
+                result_text = result_text.split("\n", 1)[-1]
+            if result_text.endswith("```"):
+                result_text = result_text.rsplit("```", 1)[0]
+            return json.loads(result_text.strip())
+        except Exception as e:
+            print(f"[Gemini Image Error] {type(e).__name__}: {e}")
+            return {"category": "靈感", "title": "圖片", "summary": "無法辨識圖片內容",
+                    "ocr_text": "", "has_deadline": False, "deadline_date": "",
+                    "has_amount": False, "amount": "", "action_needed": ""}
 
     def plan_trip(self, destination: str, start_date: str, days: int,
                   preferences: str) -> dict:

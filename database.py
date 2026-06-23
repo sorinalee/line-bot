@@ -106,6 +106,20 @@ class Database:
                 EXCEPTION WHEN duplicate_column THEN NULL;
                 END $$;
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS collections (
+                    id SERIAL PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    category TEXT NOT NULL DEFAULT '未分類',
+                    title TEXT NOT NULL DEFAULT '',
+                    summary TEXT NOT NULL DEFAULT '',
+                    raw_text TEXT NOT NULL DEFAULT '',
+                    source_url TEXT DEFAULT '',
+                    status TEXT DEFAULT 'unread',
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
 
     # ── 行程 ────────────────────────────────────────────
     def add_event(self, group_id: str, user_id: str, title: str, dt_str: str,
@@ -429,3 +443,65 @@ class Database:
                 cur.execute("DELETE FROM birthdays WHERE id = %s", (row["id"],))
                 return dict(row)
         return None
+
+    # ── 收藏 ────────────────────────────────────────────
+    def add_collection(self, user_id: str, content_type: str, category: str,
+                       title: str, summary: str, raw_text: str = "",
+                       source_url: str = "") -> dict:
+        with self._get_conn() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """INSERT INTO collections
+                   (user_id, content_type, category, title, summary, raw_text, source_url)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   RETURNING *""",
+                (user_id, content_type, category, title, summary, raw_text, source_url),
+            )
+            return dict(cur.fetchone())
+
+    def get_collections(self, user_id: str, category: str = "",
+                        status: str = "") -> list:
+        with self._get_conn() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            query = "SELECT * FROM collections WHERE user_id = %s"
+            params = [user_id]
+            if category:
+                query += " AND category = %s"
+                params.append(category)
+            if status:
+                query += " AND status = %s"
+                params.append(status)
+            query += " ORDER BY created_at DESC"
+            cur.execute(query, params)
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_today_collections(self, user_id: str) -> list:
+        today = now_tw().strftime("%Y-%m-%d")
+        with self._get_conn() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM collections WHERE user_id = %s AND created_at::date = %s ORDER BY created_at DESC",
+                (user_id, today),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def search_collections(self, user_id: str, keyword: str) -> list:
+        with self._get_conn() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """SELECT * FROM collections WHERE user_id = %s
+                   AND (title LIKE %s OR summary LIKE %s OR raw_text LIKE %s)
+                   ORDER BY created_at DESC LIMIT 20""",
+                (user_id, f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_all_user_ids_with_collections_today(self) -> list:
+        today = now_tw().strftime("%Y-%m-%d")
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT DISTINCT user_id FROM collections WHERE created_at::date = %s",
+                (today,),
+            )
+            return [row[0] for row in cur.fetchall()]

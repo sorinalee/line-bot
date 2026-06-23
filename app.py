@@ -15,10 +15,11 @@ from linebot.v3.messaging import (
     Configuration,
     ApiClient,
     MessagingApi,
+    MessagingApiBlob,
     ReplyMessageRequest,
     TextMessage,
 )
-from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from linebot.v3.webhooks import MessageEvent, TextMessageContent, ImageMessageContent
 from linebot.v3.exceptions import InvalidSignatureError
 
 from database import Database
@@ -89,7 +90,8 @@ def handle_message(event):
     elif user_msg in ["debug", "偵錯", "檢查資料"]:
         result = handle_debug(group_id)
     else:
-        result = process_with_gemini(user_msg, group_id, user_id)
+        result = process_with_gemini(user_msg, group_id, user_id,
+                                     is_private=not is_group)
 
     # 回覆
     with ApiClient(configuration) as api_client:
@@ -103,8 +105,73 @@ def handle_message(event):
         )
 
 
+# ── 圖片訊息處理（1 對 1 收藏 + OCR）─────────────────────
+@handler.add(MessageEvent, message=ImageMessageContent)
+def handle_image_message(event):
+    is_group = hasattr(event.source, "group_id") and event.source.group_id
+    if is_group:
+        return
+    user_id = event.source.user_id
+    message_id = event.message.id
+
+    try:
+        with ApiClient(configuration) as api_client:
+            blob_api = MessagingApiBlob(api_client)
+            content = blob_api.get_message_content(message_id)
+            image_bytes = content if isinstance(content, bytes) else content.read()
+
+        analysis = gemini.analyze_image(image_bytes)
+
+        category = analysis.get("category", "靈感")
+        title = analysis.get("title", "圖片")
+        summary = analysis.get("summary", "")
+        ocr_text = analysis.get("ocr_text", "")
+
+        db.add_collection(
+            user_id=user_id,
+            content_type="image",
+            category=category,
+            title=title,
+            summary=summary,
+            raw_text=ocr_text,
+        )
+
+        lines = [f"📌 已收藏 → {category}", f"📋 {title}"]
+        if summary:
+            lines.append(f"📝 {summary}")
+        if ocr_text:
+            lines.append(f"🔍 辨識文字：{ocr_text[:200]}")
+
+        if analysis.get("has_deadline") and analysis.get("deadline_date"):
+            deadline = analysis["deadline_date"]
+            lines.append(f"⏰ 截止日：{deadline}")
+            db.add_event(user_id, user_id, f"[截止] {title}", deadline)
+            lines.append("→ 已自動加入行程提醒")
+
+        if analysis.get("has_amount") and analysis.get("amount"):
+            lines.append(f"💰 金額：{analysis['amount']}")
+
+        if analysis.get("action_needed"):
+            lines.append(f"👉 {analysis['action_needed']}")
+
+        result = "\n".join(lines)
+    except Exception as e:
+        print(f"[Image Handler Error] {type(e).__name__}: {e}")
+        result = "圖片處理失敗，請稍後再試"
+
+    with ApiClient(configuration) as api_client:
+        messaging_api = MessagingApi(api_client)
+        messaging_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=result)],
+            )
+        )
+
+
 # ── Gemini 意圖解析 + 執行 ──────────────────────────────
-def process_with_gemini(user_msg: str, group_id: str, user_id: str) -> str:
+def process_with_gemini(user_msg: str, group_id: str, user_id: str,
+                        is_private: bool = False) -> str:
     """讓 Gemini 解析使用者意圖，回傳結構化 JSON，再執行對應動作。"""
 
     today = now_tw().strftime("%Y-%m-%d %H:%M (%A)")
@@ -114,7 +181,9 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str) -> str:
     pending_todos = db.get_todos(group_id, status="pending")
     shopping = db.get_shopping_list(group_id, status="pending")
 
-    context = f"""現在時間：{today}
+    mode_hint = "\n模式：1 對 1 個人助理（支援 save_collection）" if is_private else "\n模式：群組家庭助理"
+
+    context = f"""現在時間：{today}{mode_hint}
 
 【未來 7 天行程】
 {format_events_for_context(upcoming_events)}
@@ -177,6 +246,12 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str) -> str:
             return handle_delete_birthday(data, group_id)
         elif action == "plan_trip":
             return handle_plan_trip(data, group_id, user_id)
+        elif action == "save_collection":
+            return handle_save_collection(data, user_id)
+        elif action == "query_collections":
+            return handle_query_collections(data, user_id)
+        elif action == "search_collections":
+            return handle_search_collections(data, user_id)
         elif action == "summary":
             return handle_summary(group_id)
         elif action == "chat":
@@ -632,6 +707,92 @@ def handle_plan_trip(data: dict, group_id: str, user_id: str) -> str:
     lines.append(f"✅ 已將 {saved_count} 天行程存入行程表")
     lines.append("💡 輸入「小助理 這週行程」即可查看")
 
+    return "\n".join(lines)
+
+
+# ── 收藏功能 ─────────────────────────────────────────────
+CATEGORY_EMOJI = {
+    "待讀": "📖", "待辦": "✅", "靈感": "💡",
+    "帳務": "💰", "工作": "💼", "家庭": "🏠",
+}
+
+
+def handle_save_collection(data: dict, user_id: str) -> str:
+    content = data.get("content", "")
+    if not content:
+        return "請告訴我要收藏什麼內容"
+
+    has_url = "http://" in content or "https://" in content
+    analysis = gemini.analyze_collection(content)
+
+    category = analysis.get("category", "靈感")
+    title = analysis.get("title", content[:10])
+    summary = analysis.get("summary", content[:50])
+    source_url = content.strip() if has_url and "\n" not in content.strip() else ""
+
+    db.add_collection(
+        user_id=user_id,
+        content_type="url" if has_url else "text",
+        category=category,
+        title=title,
+        summary=summary,
+        raw_text=content,
+        source_url=source_url,
+    )
+
+    emoji = CATEGORY_EMOJI.get(category, "📌")
+    lines = [f"{emoji} 已收藏 → {category}", f"📋 {title}"]
+    if summary:
+        lines.append(f"📝 {summary}")
+
+    if analysis.get("has_deadline") and analysis.get("deadline_date"):
+        deadline = analysis["deadline_date"]
+        lines.append(f"⏰ 截止日：{deadline}")
+        db.add_event(user_id, user_id, f"[截止] {title}", deadline)
+        lines.append("→ 已自動加入行程提醒")
+
+    if analysis.get("action_needed"):
+        lines.append(f"👉 {analysis['action_needed']}")
+
+    return "\n".join(lines)
+
+
+def handle_query_collections(data: dict, user_id: str) -> str:
+    category = data.get("category", "")
+    items = db.get_collections(user_id, category=category)
+
+    if not items:
+        label = f"「{category}」類的" if category else ""
+        return f"目前沒有{label}收藏"
+
+    label = f"「{category}」" if category else "所有"
+    lines = [f"📚 {label}收藏（共 {len(items)} 筆）：", ""]
+    for item in items[:15]:
+        emoji = CATEGORY_EMOJI.get(item["category"], "📌")
+        date = item["created_at"].strftime("%m/%d") if hasattr(item["created_at"], "strftime") else str(item["created_at"])[:5]
+        lines.append(f"{emoji} [{item['category']}] {item['title']}（{date}）")
+        if item.get("summary"):
+            lines.append(f"   {item['summary'][:40]}")
+    if len(items) > 15:
+        lines.append(f"\n...還有 {len(items) - 15} 筆")
+    return "\n".join(lines)
+
+
+def handle_search_collections(data: dict, user_id: str) -> str:
+    keyword = data.get("keyword", "")
+    if not keyword:
+        return "請告訴我要找什麼，例如「找一下停車費」"
+
+    items = db.search_collections(user_id, keyword)
+    if not items:
+        return f"找不到包含「{keyword}」的收藏"
+
+    lines = [f"🔍 包含「{keyword}」的收藏（{len(items)} 筆）：", ""]
+    for item in items[:10]:
+        emoji = CATEGORY_EMOJI.get(item["category"], "📌")
+        lines.append(f"{emoji} [{item['category']}] {item['title']}")
+        if item.get("summary"):
+            lines.append(f"   {item['summary'][:40]}")
     return "\n".join(lines)
 
 

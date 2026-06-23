@@ -29,6 +29,7 @@ def start_scheduler(app):
     """啟動所有排程任務"""
     scheduler = BackgroundScheduler(timezone="Asia/Taipei")
     scheduler.add_job(daily_morning_push, "cron", hour=7, minute=30)
+    scheduler.add_job(daily_evening_summary, "cron", hour=21, minute=0)
     scheduler.add_job(generate_recurring_events, "cron", hour=0, minute=5)
     scheduler.add_job(archive_old_events_job, "cron", day_of_week="sun", hour=3)
     scheduler.start()
@@ -136,6 +137,48 @@ def daily_morning_push():
             push_message(group_id, text)
         except Exception as e:
             print(f"[Scheduler Error] push to {group_id}: {e}")
+
+
+def daily_evening_summary():
+    """每晚 9 點推播今日收藏摘要（只推給有收藏的 1 對 1 用戶）"""
+    db = Database()
+    user_ids = db.get_all_user_ids_with_collections_today()
+
+    for user_id in user_ids:
+        items = db.get_today_collections(user_id)
+        if not items:
+            continue
+
+        category_emoji = {
+            "待讀": "📖", "待辦": "✅", "靈感": "💡",
+            "帳務": "💰", "工作": "💼", "家庭": "🏠",
+        }
+
+        category_counts = {}
+        action_items = []
+        for item in items:
+            cat = item.get("category", "未分類")
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+            if item.get("status") == "unread":
+                action_items.append(item)
+
+        lines = [f"📊 今日收藏摘要（共 {len(items)} 筆）", ""]
+        for cat, count in sorted(category_counts.items()):
+            emoji = category_emoji.get(cat, "📌")
+            lines.append(f"{emoji} {cat}：{count} 筆")
+
+        if action_items:
+            need_action = [i for i in action_items
+                           if i.get("category") in ("待辦", "帳務", "工作")]
+            if need_action:
+                lines.append(f"\n⚡ 其中 {len(need_action)} 筆可能需要處理")
+
+        lines.append("\n💡 輸入「我的收藏」可查看完整清單")
+
+        try:
+            push_message(user_id, "\n".join(lines))
+        except Exception as e:
+            print(f"[Scheduler Error] evening summary to {user_id}: {e}")
 
 
 def generate_recurring_events():
