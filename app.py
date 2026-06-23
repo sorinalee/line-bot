@@ -7,6 +7,7 @@ LLM：Google Gemini API（免費額度）
 import os
 import json
 import re
+import threading
 import requests
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -66,6 +67,28 @@ def callback():
     return "OK"
 
 
+# ── 共用回覆函式 ───────────────────────────────────────────
+def send_reply(reply_token: str, target_id: str, text: str):
+    """先嘗試用 reply（免費），失敗則改用 push"""
+    with ApiClient(configuration) as api_client:
+        messaging_api = MessagingApi(api_client)
+        try:
+            messaging_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=reply_token,
+                    messages=[TextMessage(text=text)],
+                )
+            )
+        except Exception:
+            from linebot.v3.messaging import PushMessageRequest
+            messaging_api.push_message(
+                PushMessageRequest(
+                    to=target_id,
+                    messages=[TextMessage(text=text)],
+                )
+            )
+
+
 # ── 訊息處理 ────────────────────────────────────────────
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
@@ -86,29 +109,40 @@ def handle_message(event):
                 break
     # 1 對 1 模式：直接處理，不需要觸發詞
 
-    # 處理特殊指令（關鍵字直接攔截，不經 Gemini）
+    # 不需要 Gemini 的指令：同步處理，用 reply（免費）
+    quick_result = None
     if user_msg in ["幫助", "help", "指令", "?"]:
-        result = get_help_text()
+        quick_result = get_help_text()
     elif user_msg in ["debug", "偵錯", "檢查資料"]:
-        result = handle_debug(group_id)
+        quick_result = handle_debug(group_id)
     else:
-        # 嘗試用關鍵字快速匹配，省下 Gemini 呼叫
-        result = try_keyword_shortcut(user_msg, group_id, user_id,
-                                       is_private=not is_group)
-        if result is None:
+        quick_result = try_keyword_shortcut(user_msg, group_id, user_id,
+                                             is_private=not is_group)
+
+    if quick_result is not None:
+        with ApiClient(configuration) as api_client:
+            messaging_api = MessagingApi(api_client)
+            messaging_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text=quick_result)],
+                )
+            )
+        return
+
+    # 需要 Gemini 的指令：背景處理，避免 webhook 超時導致 LINE 重試
+    reply_token = event.reply_token
+    target_id = group_id
+
+    def _process():
+        try:
             result = process_with_gemini(user_msg, group_id, user_id,
                                          is_private=not is_group)
+            send_reply(reply_token, target_id, result)
+        except Exception as e:
+            print(f"[Background Error] {type(e).__name__}: {e}")
 
-    # 回覆
-    with ApiClient(configuration) as api_client:
-        messaging_api = MessagingApi(api_client)
-        reply = result if isinstance(result, str) else str(result)
-        messaging_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=reply)],
-            )
-        )
+    threading.Thread(target=_process, daemon=True).start()
 
 
 # ── 圖片訊息處理（1 對 1 收藏 + OCR）─────────────────────
@@ -119,68 +153,66 @@ def handle_image_message(event):
         return
     user_id = event.source.user_id
     message_id = event.message.id
+    reply_token = event.reply_token
 
-    try:
-        with ApiClient(configuration) as api_client:
-            blob_api = MessagingApiBlob(api_client)
-            content = blob_api.get_message_content(message_id)
-            if isinstance(content, (bytes, bytearray)):
-                image_bytes = bytes(content)
-            elif hasattr(content, "read"):
-                image_bytes = content.read()
-            elif hasattr(content, "content"):
-                image_bytes = content.content
-            else:
-                image_bytes = bytes(content)
-            print(f"[Image] Downloaded {len(image_bytes)} bytes for message {message_id}")
+    def _process_image():
+        try:
+            with ApiClient(configuration) as api_client:
+                blob_api = MessagingApiBlob(api_client)
+                content = blob_api.get_message_content(message_id)
+                if isinstance(content, (bytes, bytearray)):
+                    image_bytes = bytes(content)
+                elif hasattr(content, "read"):
+                    image_bytes = content.read()
+                elif hasattr(content, "content"):
+                    image_bytes = content.content
+                else:
+                    image_bytes = bytes(content)
+                print(f"[Image] Downloaded {len(image_bytes)} bytes for message {message_id}")
 
-        analysis = gemini.analyze_image(image_bytes)
+            analysis = gemini.analyze_image(image_bytes)
 
-        category = analysis.get("category", "靈感")
-        title = analysis.get("title", "圖片")
-        summary = analysis.get("summary", "")
-        ocr_text = analysis.get("ocr_text", "")
+            category = analysis.get("category", "靈感")
+            title = analysis.get("title", "圖片")
+            summary = analysis.get("summary", "")
+            ocr_text = analysis.get("ocr_text", "")
 
-        db.add_collection(
-            user_id=user_id,
-            content_type="image",
-            category=category,
-            title=title,
-            summary=summary,
-            raw_text=ocr_text,
-        )
-
-        lines = [f"📌 已收藏 → {category}", f"📋 {title}"]
-        if summary:
-            lines.append(f"📝 {summary}")
-        if ocr_text:
-            lines.append(f"🔍 辨識文字：{ocr_text[:200]}")
-
-        if analysis.get("has_deadline") and analysis.get("deadline_date"):
-            deadline = analysis["deadline_date"]
-            lines.append(f"⏰ 截止日：{deadline}")
-            db.add_event(user_id, user_id, f"[截止] {title}", deadline)
-            lines.append("→ 已自動加入行程提醒")
-
-        if analysis.get("has_amount") and analysis.get("amount"):
-            lines.append(f"💰 金額：{analysis['amount']}")
-
-        if analysis.get("action_needed"):
-            lines.append(f"👉 {analysis['action_needed']}")
-
-        result = "\n".join(lines)
-    except Exception as e:
-        print(f"[Image Handler Error] {type(e).__name__}: {e}")
-        result = "圖片處理失敗，請稍後再試"
-
-    with ApiClient(configuration) as api_client:
-        messaging_api = MessagingApi(api_client)
-        messaging_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=result)],
+            db.add_collection(
+                user_id=user_id,
+                content_type="image",
+                category=category,
+                title=title,
+                summary=summary,
+                raw_text=ocr_text,
             )
-        )
+
+            emoji = CATEGORY_EMOJI.get(category, "📌")
+            lines = [f"{emoji} 已收藏 → {category}", f"📋 {title}"]
+            if summary:
+                lines.append(f"📝 {summary}")
+            if ocr_text:
+                lines.append(f"🔍 辨識文字：{ocr_text[:200]}")
+
+            if analysis.get("has_deadline") and analysis.get("deadline_date"):
+                deadline = analysis["deadline_date"]
+                lines.append(f"⏰ 截止日：{deadline}")
+                db.add_event(user_id, user_id, f"[截止] {title}", deadline)
+                lines.append("→ 已自動加入行程提醒")
+
+            if analysis.get("has_amount") and analysis.get("amount"):
+                lines.append(f"💰 金額：{analysis['amount']}")
+
+            if analysis.get("action_needed"):
+                lines.append(f"👉 {analysis['action_needed']}")
+
+            result = "\n".join(lines)
+        except Exception as e:
+            print(f"[Image Handler Error] {type(e).__name__}: {e}")
+            result = f"圖片處理失敗：{type(e).__name__}"
+
+        send_reply(reply_token, user_id, result)
+
+    threading.Thread(target=_process_image, daemon=True).start()
 
 
 # ── 關鍵字快速匹配（不經 Gemini）──────────────────────────
