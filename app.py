@@ -873,31 +873,60 @@ class _TextExtractor(HTMLParser):
         return "\n".join(self._pieces)
 
 
+def _fetch_via_jina(url: str) -> dict:
+    """用 Jina Reader 抓取網頁內容（能處理 JS 動態渲染頁面）"""
+    resp = requests.get(
+        f"https://r.jina.ai/{url}",
+        headers={"Accept": "text/plain"},
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        return {"title": "", "description": "", "body": ""}
+    text = resp.text
+    title = ""
+    title_match = re.search(r"^Title:\s*(.+)$", text, re.MULTILINE)
+    if title_match:
+        title = title_match.group(1).strip()
+    body_start = text.find("Markdown Content:")
+    body = text[body_start + 17:].strip() if body_start != -1 else text
+    return {"title": title, "description": "", "body": body[:3000]}
+
+
+def _fetch_via_requests(url: str) -> dict:
+    """直接 HTTP 抓取（靜態頁面用）"""
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; LineBot/1.0)"}
+    resp = requests.get(url, headers=headers, timeout=10,
+                        allow_redirects=True, verify=False)
+    resp.encoding = resp.apparent_encoding or "utf-8"
+    html = resp.text[:50000]
+
+    title = ""
+    title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    if title_match:
+        title = title_match.group(1).strip()
+    og_title = re.search(r'property=["\']og:title["\'][^>]*content=["\']([^"\']+)', html, re.IGNORECASE)
+    if og_title:
+        title = og_title.group(1).strip()
+    og_desc = re.search(r'property=["\']og:description["\'][^>]*content=["\']([^"\']+)', html, re.IGNORECASE)
+    description = og_desc.group(1).strip() if og_desc else ""
+
+    extractor = _TextExtractor()
+    extractor.feed(html)
+    body_text = extractor.get_text()[:2000]
+    return {"title": title, "description": description, "body": body_text}
+
+
 def fetch_url_content(url: str) -> dict:
-    """抓取網頁標題和內文摘要"""
+    """抓取網頁內容：優先用 Jina Reader，失敗或內容太少則 fallback 直接抓取"""
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; LineBot/1.0)"}
-        resp = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
-        resp.encoding = resp.apparent_encoding or "utf-8"
-        html = resp.text[:50000]
-
-        title = ""
-        title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
-        if title_match:
-            title = title_match.group(1).strip()
-
-        og_title = re.search(r'property=["\']og:title["\'][^>]*content=["\']([^"\']+)', html, re.IGNORECASE)
-        if og_title:
-            title = og_title.group(1).strip()
-
-        og_desc = re.search(r'property=["\']og:description["\'][^>]*content=["\']([^"\']+)', html, re.IGNORECASE)
-        description = og_desc.group(1).strip() if og_desc else ""
-
-        extractor = _TextExtractor()
-        extractor.feed(html)
-        body_text = extractor.get_text()[:2000]
-
-        return {"title": title, "description": description, "body": body_text}
+        result = _fetch_via_jina(url)
+        if len(result.get("body", "")) > 50:
+            return result
+        print(f"[URL Fetch] Jina result too short, falling back to direct fetch")
+    except Exception as e:
+        print(f"[Jina Fetch Error] {e}")
+    try:
+        return _fetch_via_requests(url)
     except Exception as e:
         print(f"[URL Fetch Error] {e}")
         return {"title": "", "description": "", "body": ""}
