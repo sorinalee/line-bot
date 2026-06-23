@@ -172,10 +172,14 @@ def handle_image_message(event):
 
             analysis = gemini.analyze_image(image_bytes)
 
+            is_quota_error = analysis.get("summary", "").startswith("辨識失敗") and "429" in analysis.get("summary", "")
             category = analysis.get("category", "靈感")
             title = analysis.get("title", "圖片")
             summary = analysis.get("summary", "")
             ocr_text = analysis.get("ocr_text", "")
+
+            if is_quota_error:
+                summary = "（AI 額度已滿，圖片暫存，額度恢復後可重新辨識）"
 
             db.add_collection(
                 user_id=user_id,
@@ -283,6 +287,20 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str,
 
     if intent_json is None:
         return "抱歉，我沒有聽懂 😅 可以換個方式說說看，或輸入「小助理 幫助」查看使用方式。"
+
+    if intent_json.get("action") == "_quota_exhausted":
+        if is_private:
+            rule_cat = classify_by_rules(user_msg)
+            if rule_cat:
+                return handle_save_collection({"content": user_msg}, user_id)
+        return ("⚠️ AI 額度今日已滿，進階功能暫停。\n"
+                "基本指令仍可使用，請輸入精確關鍵字：\n"
+                "📅 今天行程 / 這週行程\n"
+                "✅ 待辦\n"
+                "🛒 購物清單\n"
+                "📚 我的收藏\n"
+                "🌤 天氣\n"
+                "輸入「幫助」查看更多指令")
 
     try:
         action = intent_json.get("action", "chat")
@@ -857,6 +875,30 @@ CATEGORY_EMOJI = {
     "帳務": "💰", "工作": "💼", "家庭": "🏠", "工具箱": "🧰",
 }
 
+CATEGORY_RULES = [
+    ("帳務", ["帳單", "繳費", "繳款", "收據", "發票", "轉帳", "匯款", "付款", "刷卡",
+              "扣款", "費用", "保費", "租金", "房租", "水費", "電費", "瓦斯費", "停車費",
+              "信用卡", "帳戶", "餘額", "薪資", "薪水", "報帳", "請款"]),
+    ("工作", ["會議", "報告", "簡報", "專案", "公文", "出差", "開會", "提案",
+              "名片", "客戶", "廠商", "合約", "KPI", "績效", "排班", "值班"]),
+    ("家庭", ["學校", "家長", "聯絡簿", "通知單", "親師", "小孩", "接送", "安親班",
+              "幼兒園", "國小", "家庭", "家人"]),
+    ("待辦", ["記得", "別忘了", "要去", "要買", "需要", "提醒", "截止", "deadline",
+              "到期", "過期", "期限"]),
+    ("待讀", ["文章", "推薦閱讀", "分享一篇", "這篇不錯", "看看這個"]),
+    ("工具箱", ["工具", "軟體", "app", "外掛", "plugin", "套件", "extension", "教學"]),
+]
+
+
+def classify_by_rules(text: str) -> str | None:
+    text_lower = text.lower()
+    for category, keywords in CATEGORY_RULES:
+        if any(kw in text_lower for kw in keywords):
+            return category
+    if "http://" in text or "https://" in text:
+        return "待讀"
+    return None
+
 
 def handle_save_collection(data: dict, user_id: str) -> str:
     content = data.get("content", "")
@@ -874,6 +916,13 @@ def handle_save_collection(data: dict, user_id: str) -> str:
                 analysis_input = f"網址：{url_match.group(0)}\n標題：{page['title']}\n描述：{page['description']}\n內文：{page['body'][:1000]}"
 
     analysis = gemini.analyze_collection(analysis_input)
+
+    if analysis.get("summary", "").startswith("分析失敗"):
+        rule_category = classify_by_rules(content)
+        if rule_category:
+            analysis["category"] = rule_category
+        analysis["title"] = content[:10]
+        analysis["summary"] = content[:50]
 
     category = analysis.get("category", "靈感")
     title = analysis.get("title", content[:10])
