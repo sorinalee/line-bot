@@ -166,10 +166,26 @@ def _collection_bubble(item: dict) -> dict:
             "color": color,
         })
     footer_buttons.append({
-        "type": "button",
-        "action": {"type": "message", "label": f"修改 #{cid}", "text": f"修改收藏 {cid}"},
-        "style": "secondary",
-        "height": "sm",
+        "type": "box",
+        "layout": "horizontal",
+        "contents": [
+            {
+                "type": "button",
+                "action": {"type": "message", "label": f"修改 #{cid}", "text": f"修改收藏 {cid}"},
+                "style": "secondary",
+                "height": "sm",
+                "flex": 1,
+            },
+            {
+                "type": "button",
+                "action": {"type": "message", "label": f"刪除 #{cid}", "text": f"刪除收藏 {cid}"},
+                "style": "secondary",
+                "height": "sm",
+                "color": "#E74C3C",
+                "flex": 1,
+            },
+        ],
+        "spacing": "sm",
     })
 
     bubble["footer"] = {

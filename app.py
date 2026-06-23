@@ -327,6 +327,10 @@ def try_keyword_shortcut(user_msg: str, group_id: str, user_id: str,
             return handle_retry_ocr(user_id)
         if msg.startswith("修改收藏"):
             return handle_edit_collection(msg, user_id)
+        if msg.startswith("刪除收藏"):
+            return handle_delete_collection(msg, user_id)
+        if msg in ["清空收藏", "刪除全部收藏"]:
+            return handle_clear_collections(user_id)
 
     return None
 
@@ -1077,6 +1081,28 @@ def handle_edit_collection(user_msg: str, user_id: str) -> str:
     return f"✅ 收藏 #{cid} 已更新為：{new_text[:50]}"
 
 
+def handle_delete_collection(user_msg: str, user_id: str) -> str:
+    part = user_msg.replace("刪除收藏", "").strip()
+    if not part:
+        return "請輸入：刪除收藏 編號\n例如：刪除收藏 5"
+    try:
+        cid = int(part)
+    except ValueError:
+        return "編號格式不正確，請輸入數字。例如：刪除收藏 5"
+    deleted = db.delete_collection(cid, user_id)
+    if not deleted:
+        return f"找不到編號 {cid} 的收藏，或該收藏不屬於你。"
+    emoji = CATEGORY_EMOJI.get(deleted.get("category", ""), "📌")
+    return f"🗑️ 已刪除收藏 #{cid}：{emoji} {deleted.get('title', '')}"
+
+
+def handle_clear_collections(user_id: str) -> str:
+    count = db.delete_all_collections(user_id)
+    if count == 0:
+        return "目前沒有任何收藏"
+    return f"🗑️ 已清空全部收藏（共 {count} 筆）"
+
+
 def handle_save_collection(data: dict, user_id: str) -> str:
     content = data.get("content", "")
     if not content:
@@ -1290,6 +1316,7 @@ def get_help_text(is_private: bool = False) -> str:
 • 我的收藏 / 收藏清單
 • 找一下{關鍵字}
 • 修改收藏 {編號} {新內容}
+• 刪除收藏 {編號} / 清空收藏
 • 重新辨識（補辨識額度不足時的圖片）
 
 【寫作助手】

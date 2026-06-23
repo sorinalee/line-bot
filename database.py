@@ -611,6 +611,31 @@ class Database:
                 deleted += 1
             return deleted
 
+    def delete_collection(self, collection_id: int, user_id: str) -> dict | None:
+        with self._get_conn() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT id, category, title FROM collections WHERE id = %s AND user_id = %s",
+                (collection_id, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            cur.execute(
+                "DELETE FROM collections WHERE id = %s AND user_id = %s",
+                (collection_id, user_id),
+            )
+            return dict(row)
+
+    def delete_all_collections(self, user_id: str) -> int:
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "DELETE FROM collections WHERE user_id = %s RETURNING id",
+                (user_id,),
+            )
+            return cur.rowcount
+
     def get_collection_by_id(self, collection_id: int, user_id: str) -> dict | None:
         with self._get_conn() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
