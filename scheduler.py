@@ -17,6 +17,7 @@ from linebot.v3.messaging import (
 
 from database import Database
 from weather_handler import get_weather
+import line_ui
 
 TW = timezone(timedelta(hours=8))
 
@@ -35,18 +36,19 @@ def start_scheduler(app):
     scheduler.start()
 
 
-def push_message(group_id: str, text: str):
-    """推播訊息到指定群組"""
+def push_message(group_id: str, text: str, is_group: bool = True):
+    """推播訊息到指定群組/使用者（附帶 Quick Reply 快捷按鈕）"""
     token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
     if not token:
         return
     configuration = Configuration(access_token=token)
+    msg = line_ui.make_text_message(text, is_group)
     with ApiClient(configuration) as api_client:
         messaging_api = MessagingApi(api_client)
         messaging_api.push_message(
             PushMessageRequest(
                 to=group_id,
-                messages=[TextMessage(text=text)],
+                messages=[msg],
             )
         )
 
@@ -145,7 +147,8 @@ def daily_morning_push():
         text = "\n".join(lines).strip()
 
         try:
-            push_message(group_id, text)
+            is_group = group_id.startswith("C")
+            push_message(group_id, text, is_group=is_group)
         except Exception as e:
             print(f"[Scheduler Error] push to {group_id}: {e}")
 
@@ -189,7 +192,7 @@ def daily_evening_summary():
         lines.append("\n💡 輸入「我的收藏」可查看完整清單")
 
         try:
-            push_message(user_id, "\n".join(lines))
+            push_message(user_id, "\n".join(lines), is_group=False)
         except Exception as e:
             print(f"[Scheduler Error] evening summary to {user_id}: {e}")
 

@@ -28,7 +28,7 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent, ImageMessageCo
 from linebot.v3.exceptions import InvalidSignatureError
 
 from database import Database
-from gemini_handler import GeminiHandler
+from gemini_handler import GeminiHandler, _call_with_retry
 from weather_handler import get_weather
 from exchange_handler import get_exchange_rate
 from scheduler import start_scheduler
@@ -110,6 +110,13 @@ def _extract_texts(node, out: list, depth=0):
 def send_reply(reply_token: str, target_id: str, result, is_group: bool = True):
     """先嘗試用 reply（免費），失敗則改用 push，Flex 失敗再降級純文字"""
     msg = _to_message(result, is_group)
+    msg_type = type(msg).__name__
+    text_preview = ""
+    if isinstance(msg, TextMessage):
+        text_preview = (msg.text or "")[:60]
+    elif isinstance(msg, FlexMessage):
+        text_preview = msg.alt_text or ""
+    print(f"[send_reply] Sending {msg_type} to {target_id[:10]}... preview='{text_preview}'")
     with ApiClient(configuration) as api_client:
         messaging_api = MessagingApi(api_client)
         try:
@@ -119,9 +126,10 @@ def send_reply(reply_token: str, target_id: str, result, is_group: bool = True):
                     messages=[msg],
                 )
             )
+            print(f"[send_reply] reply succeeded")
             return
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[send_reply] reply failed: {type(e).__name__}: {str(e)[:100]}")
         try:
             messaging_api.push_message(
                 PushMessageRequest(
@@ -129,9 +137,10 @@ def send_reply(reply_token: str, target_id: str, result, is_group: bool = True):
                     messages=[msg],
                 )
             )
+            print(f"[send_reply] push succeeded")
             return
         except Exception as e:
-            print(f"[send_reply] push failed: {e}")
+            print(f"[send_reply] push failed: {type(e).__name__}: {str(e)[:200]}")
         if isinstance(msg, FlexMessage):
             fallback_text = _flex_to_text(msg)
             print(f"[send_reply] Flex failed, falling back to text")
@@ -240,18 +249,28 @@ def handle_message(event):
     target_id = group_id
 
     def _process():
+        result = None
         try:
             result = process_with_gemini(user_msg, group_id, user_id,
                                          is_private=is_private)
-            send_reply(reply_token, target_id, result, is_group)
         except Exception as e:
             error_detail = str(e)[:200]
             print(f"[Background Error] {type(e).__name__}: {error_detail}")
+            result = f"處理時發生錯誤：{type(e).__name__}\n{error_detail}"
+        try:
+            send_reply(reply_token, target_id, result, is_group)
+        except Exception as e:
+            print(f"[Background Send Error] {type(e).__name__}: {e}")
             try:
-                error_msg = f"處理時發生錯誤：{type(e).__name__}\n{error_detail}"
-                send_reply(reply_token, target_id, error_msg, is_group)
-            except Exception:
-                pass
+                with ApiClient(configuration) as api_client:
+                    MessagingApi(api_client).push_message(
+                        PushMessageRequest(
+                            to=target_id,
+                            messages=[TextMessage(text=str(result)[:4500])],
+                        )
+                    )
+            except Exception as e2:
+                print(f"[Background Last Resort Error] {type(e2).__name__}: {e2}")
 
     threading.Thread(target=_process, daemon=True).start()
 
@@ -267,6 +286,7 @@ def handle_image_message(event):
     reply_token = event.reply_token
 
     def _process_image():
+        result = None
         try:
             with ApiClient(configuration) as api_client:
                 blob_api = MessagingApiBlob(api_client)
@@ -282,6 +302,7 @@ def handle_image_message(event):
                 print(f"[Image] Downloaded {len(image_bytes)} bytes for message {message_id}")
 
             analysis = gemini.analyze_image(image_bytes)
+            print(f"[Image] Analysis result: {json.dumps(analysis, ensure_ascii=False)[:200]}")
 
             is_quota_error = analysis.get("summary", "").startswith("辨識失敗") and "429" in analysis.get("summary", "")
             category = analysis.get("category", "靈感")
@@ -331,9 +352,22 @@ def handle_image_message(event):
                 result = "\n".join(lines)
         except Exception as e:
             print(f"[Image Handler Error] {type(e).__name__}: {e}")
-            result = f"圖片處理失敗：{type(e).__name__}"
+            result = f"圖片處理失敗：{type(e).__name__}: {str(e)[:100]}"
 
-        send_reply(reply_token, user_id, result, is_group=False)
+        try:
+            send_reply(reply_token, user_id, result, is_group=False)
+        except Exception as e:
+            print(f"[Image Send Error] {type(e).__name__}: {e}")
+            try:
+                with ApiClient(configuration) as api_client:
+                    MessagingApi(api_client).push_message(
+                        PushMessageRequest(
+                            to=user_id,
+                            messages=[TextMessage(text=str(result)[:4500])],
+                        )
+                    )
+            except Exception as e2:
+                print(f"[Image Last Resort Error] {type(e2).__name__}: {e2}")
 
     threading.Thread(target=_process_image, daemon=True).start()
 
@@ -1295,14 +1329,15 @@ def handle_draft_reply(data: dict) -> str:
     try:
         import google.generativeai as genai
         model = genai.GenerativeModel("gemini-2.5-flash")
-        response = model.generate_content(prompt)
+        response = _call_with_retry(lambda: model.generate_content(prompt))
         draft = response.text.strip()
         lines = ["✏️ 以下是擬好的回覆稿：", "", draft, "", "（可直接複製貼上，或告訴我要調整的地方）"]
         return "\n".join(lines)
     except Exception as e:
+        print(f"[Draft Reply Error] {type(e).__name__}: {e}")
         if "ResourceExhausted" in type(e).__name__ or "429" in str(e):
             return "⚠️ AI 額度已滿，寫作助手暫時無法使用，請稍後再試。"
-        return f"草擬回覆時發生錯誤：{type(e).__name__}"
+        return f"草擬回覆時發生錯誤：{type(e).__name__}: {str(e)[:100]}"
 
 
 def _format_collection_item(item: dict, show_date: bool = True) -> list:
