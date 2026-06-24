@@ -211,6 +211,8 @@ def handle_message(event):
             quick_result = get_help_text(is_private=is_private)
         elif user_msg in ["debug", "偵錯", "檢查資料"]:
             quick_result = handle_debug(group_id)
+        elif user_msg in ["測試ai", "測試AI", "ai狀態", "AI狀態"]:
+            quick_result = handle_test_gemini()
         else:
             quick_result = try_keyword_shortcut(user_msg, group_id, user_id,
                                                  is_private=is_private)
@@ -1401,6 +1403,49 @@ def handle_search_collections(data: dict, user_id: str):
     for item in items[:10]:
         lines.append("")
         lines.extend(_format_collection_item(item, show_date=False))
+    return "\n".join(lines)
+
+
+# ── AI 診斷 ─────────────────────────────────────────────
+def handle_test_gemini() -> str:
+    """直接測試 Gemini API 是否可用，回報真實錯誤"""
+    import time as _time
+    lines = ["🔬 AI 診斷報告", ""]
+    lines.append(f"⏰ 測試時間：{now_tw().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"🤖 模型：gemini-2.5-flash")
+
+    if not GEMINI_API_KEY:
+        lines.append("❌ GEMINI_API_KEY 未設定")
+        return "\n".join(lines)
+
+    lines.append(f"🔑 API Key：...{GEMINI_API_KEY[-6:]}")
+
+    try:
+        import google.generativeai as genai
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        t0 = _time.time()
+        response = model.generate_content("回覆「OK」兩個字就好")
+        elapsed = _time.time() - t0
+        reply = response.text.strip()[:50]
+        lines.append(f"✅ API 正常！回應：{reply}")
+        lines.append(f"⏱️ 耗時：{elapsed:.1f} 秒")
+    except Exception as e:
+        err_type = type(e).__name__
+        err_msg = str(e)[:300]
+        lines.append(f"❌ 錯誤類型：{err_type}")
+        lines.append(f"📝 錯誤訊息：{err_msg}")
+        if "429" in err_msg or "ResourceExhausted" in err_type:
+            lines.append("")
+            lines.append("💡 這是 API 額度耗盡（429）")
+            lines.append("   Gemini 免費額度約在台灣時間下午 3~4 點重置")
+            lines.append("   （美國太平洋時區午夜）")
+        elif "403" in err_msg or "PermissionDenied" in err_type:
+            lines.append("")
+            lines.append("💡 API Key 無效或權限不足，請檢查 Railway 環境變數")
+        elif "404" in err_msg or "NotFound" in err_type:
+            lines.append("")
+            lines.append("💡 模型名稱可能已變更，需確認 gemini-2.5-flash 是否仍可用")
+
     return "\n".join(lines)
 
 
