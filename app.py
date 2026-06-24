@@ -1330,7 +1330,8 @@ def handle_draft_reply(data: dict) -> str:
     )
     try:
         import google.generativeai as genai
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        from gemini_handler import FAST_MODEL
+        model = genai.GenerativeModel(FAST_MODEL)
         response = _call_with_retry(lambda: model.generate_content(prompt))
         draft = response.text.strip()
         lines = ["✏️ 以下是擬好的回覆稿：", "", draft, "", "（可直接複製貼上，或告訴我要調整的地方）"]
@@ -1419,12 +1420,14 @@ def handle_test_gemini() -> str:
 
     lines.append(f"🔑 Key：...{GEMINI_API_KEY[-6:]}")
 
+    from gemini_handler import FAST_MODEL, THINK_MODEL
+
     # 測試 1：簡單呼叫（無 system prompt）
     lines.append("")
-    lines.append("── 測試 1：簡單呼叫 ──")
+    lines.append(f"── 測試 1：{FAST_MODEL} 簡單呼叫 ──")
     try:
         import google.generativeai as genai
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel(FAST_MODEL)
         t0 = _time.time()
         response = model.generate_content("回覆OK")
         elapsed = _time.time() - t0

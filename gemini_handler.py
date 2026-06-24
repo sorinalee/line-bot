@@ -252,23 +252,31 @@ def _call_with_retry(func, max_retries=1, wait_sec=5):
             raise
 
 
+FAST_MODEL = "gemini-2.0-flash"
+THINK_MODEL = "gemini-2.5-flash"
+
+
 class GeminiHandler:
     def __init__(self, api_key: str):
         if api_key:
             genai.configure(api_key=api_key)
             self.model = genai.GenerativeModel(
-                model_name="gemini-2.5-flash",
+                model_name=FAST_MODEL,
                 system_instruction=SYSTEM_PROMPT,
+            )
+            self.think_model = genai.GenerativeModel(
+                model_name=THINK_MODEL,
             )
         else:
             self.model = None
+            self.think_model = None
 
     def analyze_collection(self, text: str) -> dict:
         """分析轉貼的文字/網址內容，回傳分類和摘要"""
         if not self.model:
             return {"error": "Gemini API 尚未設定"}
         try:
-            model = genai.GenerativeModel("gemini-2.5-flash")
+            model = genai.GenerativeModel(FAST_MODEL)
             response = _call_with_retry(
                 lambda: model.generate_content(f"{COLLECTION_PROMPT}\n\n內容：\n{text}"))
             result_text = response.text.strip()
@@ -289,7 +297,7 @@ class GeminiHandler:
         if not self.model:
             return {"error": "Gemini API 尚未設定"}
         try:
-            model = genai.GenerativeModel("gemini-2.5-flash")
+            model = genai.GenerativeModel(FAST_MODEL)
             image_part = {"mime_type": "image/jpeg", "data": image_bytes}
             response = _call_with_retry(
                 lambda: model.generate_content([IMAGE_ANALYSIS_PROMPT, image_part]))
@@ -340,7 +348,8 @@ class GeminiHandler:
 - 行程要合理，考慮交通時間"""
 
         try:
-            response = self.model.generate_content(prompt)
+            trip_model = self.think_model or self.model
+            response = trip_model.generate_content(prompt)
             text = response.text.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[-1]
