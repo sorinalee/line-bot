@@ -1420,7 +1420,10 @@ def handle_test_gemini() -> str:
 
     lines.append(f"🔑 Key：...{GEMINI_API_KEY[-6:]}")
 
-    from gemini_handler import FAST_MODEL, THINK_MODEL
+    from gemini_handler import FAST_MODEL, VISION_MODEL, THINK_MODEL
+    lines.append(f"📊 主力：{FAST_MODEL}（500 RPD）")
+    lines.append(f"📷 圖片：{VISION_MODEL}")
+    lines.append(f"🧠 推理：{THINK_MODEL}")
 
     # 測試 1：簡單呼叫（無 system prompt）
     lines.append("")

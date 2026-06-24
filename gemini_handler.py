@@ -252,7 +252,8 @@ def _call_with_retry(func, max_retries=1, wait_sec=5):
             raise
 
 
-FAST_MODEL = "gemini-2.0-flash"
+FAST_MODEL = "gemini-3.1-flash-lite"
+VISION_MODEL = "gemini-2.0-flash"
 THINK_MODEL = "gemini-2.5-flash"
 
 
@@ -297,7 +298,7 @@ class GeminiHandler:
         if not self.model:
             return {"error": "Gemini API 尚未設定"}
         try:
-            model = genai.GenerativeModel(FAST_MODEL)
+            model = genai.GenerativeModel(VISION_MODEL)
             image_part = {"mime_type": "image/jpeg", "data": image_bytes}
             response = _call_with_retry(
                 lambda: model.generate_content([IMAGE_ANALYSIS_PROMPT, image_part]))
