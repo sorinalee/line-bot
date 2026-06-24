@@ -1408,43 +1408,69 @@ def handle_search_collections(data: dict, user_id: str):
 
 # ── AI 診斷 ─────────────────────────────────────────────
 def handle_test_gemini() -> str:
-    """直接測試 Gemini API 是否可用，回報真實錯誤"""
+    """測試 Gemini API — 簡單呼叫 + 完整意圖解析，找出真正的瓶頸"""
     import time as _time
-    lines = ["🔬 AI 診斷報告", ""]
-    lines.append(f"⏰ 測試時間：{now_tw().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append(f"🤖 模型：gemini-2.5-flash")
+    lines = ["🔬 AI 完整診斷", ""]
+    lines.append(f"⏰ {now_tw().strftime('%Y-%m-%d %H:%M:%S')}")
 
     if not GEMINI_API_KEY:
         lines.append("❌ GEMINI_API_KEY 未設定")
         return "\n".join(lines)
 
-    lines.append(f"🔑 API Key：...{GEMINI_API_KEY[-6:]}")
+    lines.append(f"🔑 Key：...{GEMINI_API_KEY[-6:]}")
 
+    # 測試 1：簡單呼叫（無 system prompt）
+    lines.append("")
+    lines.append("── 測試 1：簡單呼叫 ──")
     try:
         import google.generativeai as genai
         model = genai.GenerativeModel("gemini-2.5-flash")
         t0 = _time.time()
-        response = model.generate_content("回覆「OK」兩個字就好")
+        response = model.generate_content("回覆OK")
         elapsed = _time.time() - t0
-        reply = response.text.strip()[:50]
-        lines.append(f"✅ API 正常！回應：{reply}")
-        lines.append(f"⏱️ 耗時：{elapsed:.1f} 秒")
+        lines.append(f"✅ 成功（{elapsed:.1f}s）")
     except Exception as e:
-        err_type = type(e).__name__
-        err_msg = str(e)[:300]
-        lines.append(f"❌ 錯誤類型：{err_type}")
-        lines.append(f"📝 錯誤訊息：{err_msg}")
-        if "429" in err_msg or "ResourceExhausted" in err_type:
-            lines.append("")
-            lines.append("💡 這是 API 額度耗盡（429）")
-            lines.append("   Gemini 免費額度約在台灣時間下午 3~4 點重置")
-            lines.append("   （美國太平洋時區午夜）")
-        elif "403" in err_msg or "PermissionDenied" in err_type:
-            lines.append("")
-            lines.append("💡 API Key 無效或權限不足，請檢查 Railway 環境變數")
-        elif "404" in err_msg or "NotFound" in err_type:
-            lines.append("")
-            lines.append("💡 模型名稱可能已變更，需確認 gemini-2.5-flash 是否仍可用")
+        lines.append(f"❌ {type(e).__name__}: {str(e)[:150]}")
+        return "\n".join(lines)
+
+    # 測試 2：帶 system_instruction（跟 parse_intent 一樣）
+    lines.append("")
+    lines.append("── 測試 2：意圖解析（完整 prompt）──")
+    try:
+        t0 = _time.time()
+        result = gemini.parse_intent("今天天氣", f"現在時間：{now_tw().strftime('%Y-%m-%d %H:%M (%A)')}\n模式：1 對 1 個人助理\n\n【未來 7 天行程】\n（無）\n\n【待辦事項】\n（無）\n\n【購物清單】\n（無）")
+        elapsed = _time.time() - t0
+        if result is None:
+            lines.append(f"⚠️ 回傳 None（{elapsed:.1f}s）")
+        elif result.get("action") == "_quota_exhausted":
+            lines.append(f"❌ 額度耗盡（{elapsed:.1f}s）")
+            lines.append("   但測試 1 成功 → 可能是 RPM 限制")
+            lines.append("   兩次呼叫間隔太短觸發每分鐘限流")
+        else:
+            action = result.get("action", "?")
+            lines.append(f"✅ 成功（{elapsed:.1f}s）→ action={action}")
+    except Exception as e:
+        elapsed = _time.time() - t0
+        lines.append(f"❌ {type(e).__name__}（{elapsed:.1f}s）")
+        lines.append(f"   {str(e)[:200]}")
+
+    # 測試 3：帶 system_instruction 但間隔 6 秒（避免 RPM 限流）
+    if any("額度耗盡" in l or "❌" in l for l in lines[-3:]):
+        lines.append("")
+        lines.append("── 測試 3：等 6 秒後重試 ──")
+        import time
+        time.sleep(6)
+        try:
+            t0 = _time.time()
+            result = gemini.parse_intent("今天天氣", f"現在時間：{now_tw().strftime('%Y-%m-%d %H:%M (%A)')}\n模式：測試\n\n【行程】（無）\n【待辦】（無）\n【購物】（無）")
+            elapsed = _time.time() - t0
+            if result and result.get("action") != "_quota_exhausted":
+                lines.append(f"✅ 間隔後成功（{elapsed:.1f}s）→ 確認是 RPM 限流")
+                lines.append("💡 建議：parse_intent 前加短暫延遲")
+            else:
+                lines.append(f"❌ 仍失敗（{elapsed:.1f}s）→ 是每日額度問題")
+        except Exception as e:
+            lines.append(f"❌ {type(e).__name__}: {str(e)[:150]}")
 
     return "\n".join(lines)
 
