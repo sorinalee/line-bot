@@ -253,7 +253,7 @@ def _call_with_retry(func, max_retries=1, wait_sec=5):
 
 
 FAST_MODEL = "gemini-3.1-flash-lite"
-VISION_MODEL = "gemini-2.0-flash"
+VISION_MODEL = "gemini-3.1-flash-lite"
 THINK_MODEL = "gemini-2.5-flash"
 
 
