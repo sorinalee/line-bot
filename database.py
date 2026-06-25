@@ -354,6 +354,16 @@ class Database:
                 return dict(row)
         return None
 
+    def complete_all_shopping(self, group_id: str) -> int:
+        """將所有 pending 項目標記為 bought 並刪除"""
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "DELETE FROM shopping_list WHERE group_id = %s AND status = 'pending'",
+                (group_id,),
+            )
+            return cur.rowcount
+
     def clear_bought_items(self, group_id: str) -> int:
         """清除所有已購買的項目"""
         with self._get_conn() as conn:

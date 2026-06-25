@@ -349,7 +349,7 @@ def handle_image_message(event):
                     lines.append(f"💰 金額：{analysis['amount']}")
 
                 if analysis.get("action_needed"):
-                    lines.append(f"👉 {analysis['action_needed']}")
+                    lines.append(f"💡 建議：{analysis['action_needed']}")
 
                 result = "\n".join(lines)
         except Exception as e:
@@ -399,6 +399,8 @@ def try_keyword_shortcut(user_msg: str, group_id: str, user_id: str,
         return "請告訴我要買什麼，例如「要買牛奶、雞蛋」"
     if msg in ["完成購物"]:
         return "請告訴我買了什麼，例如「牛奶買了」"
+    if msg in ["全部買了", "都買了", "購物清單全部完成"]:
+        return handle_complete_all_shopping(group_id)
     if msg in ["總覽", "目前狀態"]:
         return handle_summary(group_id, is_group)
     if msg in ["生日", "生日清單"]:
@@ -513,6 +515,8 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str,
             return handle_delete_shopping(data, group_id)
         elif action == "clear_shopping":
             return handle_clear_shopping(group_id)
+        elif action == "complete_all_shopping":
+            return handle_complete_all_shopping(group_id)
         elif action == "query_exchange":
             currency = data.get("currency", "")
             amount = data.get("amount", 0)
@@ -602,6 +606,30 @@ def normalize_date(date_str: str) -> str | None:
 
 # ── 動作處理函式 ─────────────────────────────────────────
 def handle_add_event(data: dict, group_id: str, user_id: str) -> str:
+    items = data.get("items", [])
+
+    if items:
+        results = []
+        for item in items:
+            t = item.get("title", "未命名行程")
+            d = item.get("date", "")
+            tm = item.get("time", "")
+            rec = item.get("recurrence", "")
+            if not d:
+                continue
+            normalized = normalize_date(d)
+            if normalized is None:
+                normalized = d
+            dt_str = f"{normalized} {tm}".strip()
+            db.add_event(group_id, user_id, t, dt_str, recurrence=rec)
+            line = f"📅 {dt_str}  {t}"
+            if rec:
+                line += f" 🔁{rec}"
+            results.append(line)
+        if not results:
+            return "請告訴我行程的日期，例如「7/5 下午三點 看牙醫」"
+        return "✅ 已新增 {} 筆行程：\n{}".format(len(results), "\n".join(results))
+
     title = data.get("title", "未命名行程")
     date_str = data.get("date", "")
     time_str = data.get("time", "")
@@ -868,6 +896,13 @@ def handle_clear_shopping(group_id: str) -> str:
     if count > 0:
         return f"🗑️ 已清除 {count} 個已購買項目"
     return "沒有已購買的項目需要清除"
+
+
+def handle_complete_all_shopping(group_id: str) -> str:
+    count = db.complete_all_shopping(group_id)
+    if count > 0:
+        return f"✅ 太棒了！購物清單 {count} 項全部完成 🎉"
+    return "購物清單是空的，沒有需要完成的項目"
 
 
 # ── 生日 ──────────────────────────────────────────────
@@ -1300,7 +1335,7 @@ def handle_save_collection(data: dict, user_id: str) -> str:
     if analysis.get("has_amount") and analysis.get("amount"):
         extra_info.append(f"💰 金額：{analysis['amount']}")
     if analysis.get("action_needed"):
-        extra_info.append(f"👉 {analysis['action_needed']}")
+        extra_info.append(f"💡 建議：{analysis['action_needed']}")
 
     emoji = CATEGORY_EMOJI.get(category, "📌")
     try:

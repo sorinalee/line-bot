@@ -535,12 +535,20 @@ def build_shopping_flex(items: list, is_group: bool = True) -> FlexMessage:
         },
         "footer": {
             "type": "box",
-            "layout": "horizontal",
+            "layout": "vertical",
             "contents": [
-                {"type": "button", "action": {"type": "message", "label": "✅ 完成項目", "text": "完成購物"},
-                 "style": "primary", "color": "#E67E22", "height": "sm", "flex": 1},
-                {"type": "button", "action": {"type": "message", "label": "➕ 新增", "text": "新增購物"},
-                 "style": "secondary", "height": "sm", "flex": 1, "margin": "sm"},
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "contents": [
+                        {"type": "button", "action": {"type": "message", "label": "✅ 完成項目", "text": "完成購物"},
+                         "style": "primary", "color": "#E67E22", "height": "sm", "flex": 1},
+                        {"type": "button", "action": {"type": "message", "label": "➕ 新增", "text": "新增購物"},
+                         "style": "secondary", "height": "sm", "flex": 1, "margin": "sm"},
+                    ],
+                },
+                {"type": "button", "action": {"type": "message", "label": "🎉 全部買了", "text": "全部買了"},
+                 "style": "secondary", "height": "sm", "margin": "sm"},
             ],
             "paddingAll": "10px",
         },
