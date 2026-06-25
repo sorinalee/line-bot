@@ -391,6 +391,14 @@ def try_keyword_shortcut(user_msg: str, group_id: str, user_id: str,
         return handle_query_todos(group_id, is_group)
     if msg in ["購物清單", "要買什麼"]:
         return handle_query_shopping(group_id, is_group)
+    if msg in ["新增待辦"]:
+        return "請告訴我要新增什麼待辦事項，例如「記得繳電費」"
+    if msg in ["完成待辦"]:
+        return "請告訴我要完成哪個待辦，例如「繳電費 完成了」"
+    if msg in ["新增購物"]:
+        return "請告訴我要買什麼，例如「要買牛奶、雞蛋」"
+    if msg in ["完成購物"]:
+        return "請告訴我買了什麼，例如「牛奶買了」"
     if msg in ["總覽", "目前狀態"]:
         return handle_summary(group_id, is_group)
     if msg in ["生日", "生日清單"]:
@@ -485,7 +493,7 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str,
         elif action == "update_event":
             return handle_update_event(data, group_id)
         elif action == "add_todo":
-            return handle_add_todo(data, group_id, user_id)
+            return handle_add_todo(data, group_id, user_id, not is_private)
         elif action == "complete_todo":
             return handle_complete_todo(data, group_id)
         elif action == "query_todos":
@@ -496,7 +504,7 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str,
             location = data.get("location", "")
             return get_weather(location)
         elif action == "add_shopping":
-            return handle_add_shopping(data, group_id, user_id)
+            return handle_add_shopping(data, group_id, user_id, not is_private)
         elif action == "complete_shopping":
             return handle_complete_shopping(data, group_id)
         elif action == "query_shopping":
@@ -713,7 +721,8 @@ def handle_update_event(data: dict, group_id: str) -> str:
     return f"📝 已修改行程：{updated['title']}（{updated['datetime']}）"
 
 
-def handle_add_todo(data: dict, group_id: str, user_id: str) -> str:
+def handle_add_todo(data: dict, group_id: str, user_id: str,
+                    is_group: bool = True):
     items = data.get("items", [])
     if not items:
         title = data.get("title", "")
@@ -722,12 +731,13 @@ def handle_add_todo(data: dict, group_id: str, user_id: str) -> str:
         else:
             return "請告訴我要新增什麼待辦事項"
 
-    results = []
     for item in items:
         db.add_todo(group_id, user_id, item)
-        results.append(f"  ☐ {item}")
 
-    return "✅ 已新增待辦：\n" + "\n".join(results)
+    flex = line_ui.build_add_confirm_flex(items, "todo", is_group)
+    if flex:
+        return flex
+    return "✅ 已新增待辦：\n" + "\n".join(f"  ☐ {i}" for i in items)
 
 
 def handle_complete_todo(data: dict, group_id: str) -> str:
@@ -798,7 +808,8 @@ def handle_summary(group_id: str, is_group: bool = True):
 
 
 # ── 購物清單 ───────────────────────────────────────────
-def handle_add_shopping(data: dict, group_id: str, user_id: str) -> str:
+def handle_add_shopping(data: dict, group_id: str, user_id: str,
+                        is_group: bool = True):
     items = data.get("items", [])
     if not items:
         item = data.get("item", "")
@@ -807,12 +818,13 @@ def handle_add_shopping(data: dict, group_id: str, user_id: str) -> str:
         else:
             return "請告訴我要買什麼，例如「要買牛奶、雞蛋」"
 
-    results = []
     for item in items:
         db.add_shopping_item(group_id, user_id, item)
-        results.append(f"  🛒 {item}")
 
-    return "✅ 已加入購物清單：\n" + "\n".join(results)
+    flex = line_ui.build_add_confirm_flex(items, "shopping", is_group)
+    if flex:
+        return flex
+    return "✅ 已加入購物清單：\n" + "\n".join(f"  🛒 {i}" for i in items)
 
 
 def handle_complete_shopping(data: dict, group_id: str) -> str:

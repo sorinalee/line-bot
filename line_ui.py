@@ -76,6 +76,7 @@ def build_quick_reply(is_group: bool = True) -> QuickReply:
             ("📚 我的收藏", "我的收藏"),
             ("📅 今天行程", "今天行程"),
             ("✅ 待辦", "待辦"),
+            ("🛒 購物清單", "購物清單"),
             ("🌤 天氣", "天氣"),
             ("🔄 重新辨識", "重新辨識"),
             ("❓ 幫助", "幫助"),
@@ -472,6 +473,17 @@ def build_todos_flex(todos: list, is_group: bool = True) -> FlexMessage:
             "contents": body_contents,
             "paddingAll": "12px",
         },
+        "footer": {
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                {"type": "button", "action": {"type": "message", "label": "✅ 完成項目", "text": "完成待辦"},
+                 "style": "primary", "color": "#27AE60", "height": "sm", "flex": 1},
+                {"type": "button", "action": {"type": "message", "label": "➕ 新增", "text": "新增待辦"},
+                 "style": "secondary", "height": "sm", "flex": 1, "margin": "sm"},
+            ],
+            "paddingAll": "10px",
+        },
     }
 
     return FlexMessage(
@@ -485,12 +497,16 @@ def build_todos_flex(todos: list, is_group: bool = True) -> FlexMessage:
 
 def build_shopping_flex(items: list, is_group: bool = True) -> FlexMessage:
     body_contents = []
-    for s in items[:15]:
+    for i, s in enumerate(items[:15], 1):
         body_contents.append({
-            "type": "text",
-            "text": f"🛒 {s['item']}",
-            "size": "sm",
-            "wrap": True,
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                {"type": "text", "text": f"{i}.", "size": "sm", "color": "#999999",
+                 "flex": 1},
+                {"type": "text", "text": f"☐ {s['item']}", "size": "sm",
+                 "flex": 9, "wrap": True},
+            ],
             "margin": "sm",
         })
 
@@ -517,10 +533,85 @@ def build_shopping_flex(items: list, is_group: bool = True) -> FlexMessage:
             "contents": body_contents,
             "paddingAll": "12px",
         },
+        "footer": {
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                {"type": "button", "action": {"type": "message", "label": "✅ 完成項目", "text": "完成購物"},
+                 "style": "primary", "color": "#E67E22", "height": "sm", "flex": 1},
+                {"type": "button", "action": {"type": "message", "label": "➕ 新增", "text": "新增購物"},
+                 "style": "secondary", "height": "sm", "flex": 1, "margin": "sm"},
+            ],
+            "paddingAll": "10px",
+        },
     }
 
     return FlexMessage(
         alt_text=f"🛒 購物清單（{len(items)} 項）",
+        contents=FlexContainer.from_dict(bubble),
+        quick_reply=build_quick_reply(is_group),
+    )
+
+
+# ── Flex: 新增確認卡片 ───────────────────────────────────
+
+def build_add_confirm_flex(items: list, category: str = "todo",
+                           is_group: bool = True) -> FlexMessage:
+    if category == "todo":
+        title = "✅ 已新增待辦"
+        color = "#27AE60"
+        view_label = "📋 查看清單"
+        view_text = "待辦"
+        add_label = "➕ 繼續新增"
+        add_text = "新增待辦"
+    else:
+        title = "✅ 已加入購物清單"
+        color = "#E67E22"
+        view_label = "🛒 查看清單"
+        view_text = "購物清單"
+        add_label = "➕ 繼續新增"
+        add_text = "新增購物"
+
+    body_contents = []
+    for item in items:
+        body_contents.append({
+            "type": "text", "text": f"• {item}", "size": "sm",
+            "wrap": True, "margin": "sm",
+        })
+
+    bubble = {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": title, "weight": "bold",
+                 "color": "#FFFFFF", "size": "md"},
+            ],
+            "backgroundColor": color,
+            "paddingAll": "14px",
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": body_contents,
+            "paddingAll": "12px",
+        },
+        "footer": {
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                {"type": "button", "action": {"type": "message", "label": view_label, "text": view_text},
+                 "style": "primary", "color": color, "height": "sm", "flex": 1},
+                {"type": "button", "action": {"type": "message", "label": add_label, "text": add_text},
+                 "style": "secondary", "height": "sm", "flex": 1, "margin": "sm"},
+            ],
+            "paddingAll": "10px",
+        },
+    }
+
+    return FlexMessage(
+        alt_text=title,
         contents=FlexContainer.from_dict(bubble),
         quick_reply=build_quick_reply(is_group),
     )
