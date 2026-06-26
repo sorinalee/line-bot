@@ -47,6 +47,9 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
 
 6. **add_todo** — 新增待辦（支援一次多筆）
    回傳：{"action": "add_todo", "data": {"items": ["牛奶", "雞蛋", "衛生紙"]}}
+   - 「記得帶咖啡包」→ {"action": "add_todo", "data": {"items": ["帶咖啡包"]}}
+   - 「記得帶藥」→ {"action": "add_todo", "data": {"items": ["帶藥"]}}
+   - 「別忘了帶傘」→ {"action": "add_todo", "data": {"items": ["帶傘"]}}
 
 7. **complete_todo** — 完成待辦
    回傳：{"action": "complete_todo", "data": {"keyword": "牛奶"}}
@@ -150,7 +153,9 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
 ## 購物清單 vs 待辦事項的判斷規則
 
 - 明確說「要買」「購物」「採買」「超市」「賣場」→ **add_shopping**
-- 明確說「待辦」「要做」「記得」→ **add_todo**
+- 明確說「待辦」「要做」「記得」「別忘了」→ **add_todo**
+- 「記得帶X」「帶一下X」「別忘了帶X」永遠是 **add_todo**，不管 X 是什麼物品（帶東西≠買東西）
+- 「complete_todo」只在使用者說「X 完成了」「X 做好了」「X 搞定」才觸發，不是要「記得做X」
 - 模糊時（「加一下牛奶」）：如果是可購買的物品 → add_shopping；如果是要做的事 → add_todo
 - 「XX買了」的判斷：先看購物清單有沒有 XX，有就是 complete_shopping；沒有則 complete_todo
 
@@ -372,8 +377,8 @@ class GeminiHandler:
             print(f"[Gemini Trip Error] {type(e).__name__}: {e}")
             return {"error": f"{type(e).__name__}: {str(e)[:100]}"}
 
-    def parse_intent(self, user_msg: str, context: str) -> dict | None:
-        """解析使用者意圖，回傳結構化 dict，失敗回傳 None"""
+    def parse_intent(self, user_msg: str, context: str) -> dict | list | None:
+        """解析使用者意圖，回傳結構化 dict（單一動作）或 list（多動作），失敗回傳 None"""
 
         if not self.model:
             return {"action": "chat", "reply": "Gemini API 尚未設定，請設定 GEMINI_API_KEY 環境變數。"}
@@ -396,18 +401,34 @@ class GeminiHandler:
                 text = text.rsplit("```", 1)[0]
             text = text.strip()
 
-            result = json.loads(text)
+            try:
+                result = json.loads(text)
+            except json.JSONDecodeError:
+                # Gemini 有時回傳多個 JSON 物件（換行分隔），嘗試逐一解析
+                import re
+                objects = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}', text, re.DOTALL)
+                parsed = []
+                for obj in objects:
+                    try:
+                        parsed.append(json.loads(obj))
+                    except json.JSONDecodeError:
+                        pass
+                if len(parsed) == 1:
+                    result = parsed[0]
+                elif len(parsed) > 1:
+                    result = parsed  # 回傳 list，由 app.py 依序執行
+                else:
+                    print(f"[Gemini JSON Error] raw={text[:300]}")
+                    return {"action": "chat", "reply": "我沒聽懂，可以再說一次嗎？"}
 
-            # 確保 query_events 的 days 至少為 1
-            if result.get("action") == "query_events":
+            # 確保 query_events 的 days 至少為 1（單一 dict 時）
+            if isinstance(result, dict) and result.get("action") == "query_events":
                 days = result.get("data", {}).get("days", 7)
                 if days < 1:
                     result["data"]["days"] = 1
 
             return result
 
-        except json.JSONDecodeError:
-            return {"action": "chat", "reply": text if text else "我沒聽懂，可以再說一次嗎？"}
         except Exception as e:
             print(f"[Gemini Error] type={type(e).__name__} msg={e}")
             if "ResourceExhausted" in type(e).__name__ or "429" in str(e):

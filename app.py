@@ -466,6 +466,16 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str,
     if intent_json is None:
         return "抱歉，我沒有聽懂 😅 可以換個方式說說看，或輸入「小助理 幫助」查看使用方式。"
 
+    # 多 action：依序執行，合併回覆
+    if isinstance(intent_json, list):
+        results = []
+        for single_intent in intent_json:
+            if isinstance(single_intent, dict) and single_intent.get("action") not in (None, "chat"):
+                r = _dispatch_intent(single_intent, group_id, user_id, is_private)
+                if r:
+                    results.append(r)
+        return "\n\n".join(results) if results else "好的，已處理完成！"
+
     if intent_json.get("action") == "_quota_exhausted":
         if is_private:
             rule_cat = classify_by_rules(user_msg)
@@ -481,71 +491,75 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str,
                 "輸入「幫助」查看更多指令")
 
     try:
-        action = intent_json.get("action", "chat")
-        data = intent_json.get("data", {})
-
-        if action == "add_event":
-            return handle_add_event(data, group_id, user_id)
-        elif action == "query_events":
-            return handle_query_events(data, group_id, not is_private)
-        elif action == "search_events":
-            return handle_search_events(data, group_id)
-        elif action == "delete_event":
-            return handle_delete_event(data, group_id)
-        elif action == "update_event":
-            return handle_update_event(data, group_id)
-        elif action == "add_todo":
-            return handle_add_todo(data, group_id, user_id, not is_private)
-        elif action == "complete_todo":
-            return handle_complete_todo(data, group_id)
-        elif action == "query_todos":
-            return handle_query_todos(group_id, not is_private)
-        elif action == "delete_todo":
-            return handle_delete_todo(data, group_id)
-        elif action == "query_weather":
-            location = data.get("location", "")
-            return get_weather(location)
-        elif action == "add_shopping":
-            return handle_add_shopping(data, group_id, user_id, not is_private)
-        elif action == "complete_shopping":
-            return handle_complete_shopping(data, group_id)
-        elif action == "query_shopping":
-            return handle_query_shopping(group_id, not is_private)
-        elif action == "delete_shopping":
-            return handle_delete_shopping(data, group_id)
-        elif action == "clear_shopping":
-            return handle_clear_shopping(group_id)
-        elif action == "complete_all_shopping":
-            return handle_complete_all_shopping(group_id)
-        elif action == "query_exchange":
-            currency = data.get("currency", "")
-            amount = data.get("amount", 0)
-            return get_exchange_rate(currency, amount)
-        elif action == "add_birthday":
-            return handle_add_birthday(data, group_id)
-        elif action == "query_birthdays":
-            return handle_query_birthdays(group_id)
-        elif action == "delete_birthday":
-            return handle_delete_birthday(data, group_id)
-        elif action == "plan_trip":
-            return handle_plan_trip(data, group_id, user_id)
-        elif action == "save_collection":
-            return handle_save_collection(data, user_id)
-        elif action == "query_collections":
-            return handle_query_collections(data, user_id)
-        elif action == "search_collections":
-            return handle_search_collections(data, user_id)
-        elif action == "draft_reply":
-            return handle_draft_reply(data)
-        elif action == "summary":
-            return handle_summary(group_id, not is_private)
-        elif action == "chat":
-            return intent_json.get("reply", "好的，收到！")
-        else:
-            return intent_json.get("reply", "我不太確定你的意思，可以再說清楚一點嗎？")
-
+        return _dispatch_intent(intent_json, group_id, user_id, is_private)
     except Exception as e:
         return f"處理時發生錯誤：{str(e)}"
+
+
+def _dispatch_intent(intent_json: dict, group_id: str, user_id: str, is_private: bool) -> str:
+    """將單一 intent dict 分派到對應的 handler，回傳文字結果"""
+    action = intent_json.get("action", "chat")
+    data = intent_json.get("data", {})
+
+    if action == "add_event":
+        return handle_add_event(data, group_id, user_id)
+    elif action == "query_events":
+        return handle_query_events(data, group_id, not is_private)
+    elif action == "search_events":
+        return handle_search_events(data, group_id)
+    elif action == "delete_event":
+        return handle_delete_event(data, group_id)
+    elif action == "update_event":
+        return handle_update_event(data, group_id)
+    elif action == "add_todo":
+        return handle_add_todo(data, group_id, user_id, not is_private)
+    elif action == "complete_todo":
+        return handle_complete_todo(data, group_id)
+    elif action == "query_todos":
+        return handle_query_todos(group_id, not is_private)
+    elif action == "delete_todo":
+        return handle_delete_todo(data, group_id)
+    elif action == "query_weather":
+        location = data.get("location", "")
+        return get_weather(location)
+    elif action == "add_shopping":
+        return handle_add_shopping(data, group_id, user_id, not is_private)
+    elif action == "complete_shopping":
+        return handle_complete_shopping(data, group_id)
+    elif action == "query_shopping":
+        return handle_query_shopping(group_id, not is_private)
+    elif action == "delete_shopping":
+        return handle_delete_shopping(data, group_id)
+    elif action == "clear_shopping":
+        return handle_clear_shopping(group_id)
+    elif action == "complete_all_shopping":
+        return handle_complete_all_shopping(group_id)
+    elif action == "query_exchange":
+        currency = data.get("currency", "")
+        amount = data.get("amount", 0)
+        return get_exchange_rate(currency, amount)
+    elif action == "add_birthday":
+        return handle_add_birthday(data, group_id)
+    elif action == "query_birthdays":
+        return handle_query_birthdays(group_id)
+    elif action == "delete_birthday":
+        return handle_delete_birthday(data, group_id)
+    elif action == "plan_trip":
+        return handle_plan_trip(data, group_id, user_id)
+    elif action == "save_collection":
+        return handle_save_collection(data, user_id)
+    elif action == "query_collections":
+        return handle_query_collections(data, user_id)
+    elif action == "search_collections":
+        return handle_search_collections(data, user_id)
+    elif action == "draft_reply":
+        return handle_draft_reply(data)
+    elif action == "summary":
+        return handle_summary(group_id, not is_private)
+    elif action == "chat":
+        return intent_json.get("reply", "好的，收到！")
+    else:
+        return intent_json.get("reply", "我不太確定你的意思，可以再說清楚一點嗎？")
 
 
 # ── 日期正規化 ──────────────────────────────────────────
