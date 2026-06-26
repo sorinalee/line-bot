@@ -120,12 +120,13 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
     注意：start_date 必須是 YYYY-MM-DD 格式。如果使用者沒有指定出發日期，start_date 留空字串 ""。
     preferences 放使用者提到的偏好（美食、親子、文青、購物等），沒有就留空字串。
 
-23. **save_collection** — 使用者轉貼內容要你幫忙收藏（只在 1 對 1 中使用）
+23. **save_collection** — 使用者轉貼內容要你幫忙收藏（1 對 1 個人收藏、群組則為共享收藏）
     - 當訊息是一段轉貼的文字、網址、或看起來是從別處複製過來的內容
     - 「幫我存這個」「記一下」+ 內容 → save_collection
     - 直接丟一個網址（https://...）→ save_collection
+    - 群組中也支援：「小助理 幫我存這個」「小助理 收藏這篇」→ save_collection（收藏為群組共享）
     回傳：{"action": "save_collection", "data": {"content": "使用者的原始內容"}}
-    注意：如果使用者只是丟一段文字或網址，沒有明確要做其他事（不是新增行程、待辦等），在 1 對 1 模式下判斷為 save_collection
+    注意：如果使用者只是丟一段文字或網址，沒有明確要做其他事（不是新增行程、待辦等），判斷為 save_collection
 
 24. **query_collections** — 查看收藏清單
     - 「我的收藏」「今天收藏了什麼」→ {"action": "query_collections", "data": {"category": ""}}

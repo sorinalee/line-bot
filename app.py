@@ -408,22 +408,23 @@ def try_keyword_shortcut(user_msg: str, group_id: str, user_id: str,
     if msg in ["天氣", "今天天氣"]:
         return get_weather("")
 
-    # 收藏類（僅 1 對 1）
+    # 收藏類（1 對 1 用 user_id，群組用 group_id 共享）
+    owner_id = user_id if is_private else group_id
+    if msg in ["我的收藏", "收藏清單", "收藏"]:
+        return handle_query_collections({"category": ""}, owner_id)
+    if msg in ["今天收藏了什麼", "今天的收藏"]:
+        items = db.get_today_collections(owner_id)
+        if not items:
+            return "今天還沒有收藏任何東西"
+        flex = line_ui.build_collection_flex(items, "今日收藏")
+        if flex:
+            return flex
+        lines = [f"📚 今日收藏（{len(items)} 筆）：", ""]
+        for item in items:
+            emoji = CATEGORY_EMOJI.get(item["category"], "📌")
+            lines.append(f"{emoji} [{item['category']}] {item['title']}")
+        return "\n".join(lines)
     if is_private:
-        if msg in ["我的收藏", "收藏清單", "收藏"]:
-            return handle_query_collections({"category": ""}, user_id)
-        if msg in ["今天收藏了什麼", "今天的收藏"]:
-            items = db.get_today_collections(user_id)
-            if not items:
-                return "今天還沒有收藏任何東西"
-            flex = line_ui.build_collection_flex(items, "今日收藏")
-            if flex:
-                return flex
-            lines = [f"📚 今日收藏（{len(items)} 筆）：", ""]
-            for item in items:
-                emoji = CATEGORY_EMOJI.get(item["category"], "📌")
-                lines.append(f"{emoji} [{item['category']}] {item['title']}")
-            return "\n".join(lines)
         if msg in ["重新辨識", "補辨識", "辨識圖片"]:
             return handle_retry_ocr(user_id)
         if msg.startswith("修改收藏"):
@@ -432,6 +433,11 @@ def try_keyword_shortcut(user_msg: str, group_id: str, user_id: str,
             return handle_delete_collection(msg, user_id)
         if msg in ["清空收藏", "刪除全部收藏"]:
             return handle_clear_collections(user_id)
+    else:
+        if msg.startswith("刪除收藏"):
+            return handle_delete_collection(msg, group_id)
+        if msg in ["清空收藏", "刪除全部收藏"]:
+            return handle_clear_collections(group_id)
 
     return None
 
@@ -448,7 +454,7 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str,
     pending_todos = db.get_todos(group_id, status="pending")
     shopping = db.get_shopping_list(group_id, status="pending")
 
-    mode_hint = "\n模式：1 對 1 個人助理（支援 save_collection）" if is_private else "\n模式：群組家庭助理"
+    mode_hint = "\n模式：1 對 1 個人助理（支援 save_collection）" if is_private else "\n模式：群組家庭助理（支援 save_collection，收藏為群組共享）"
 
     context = f"""現在時間：{today}{mode_hint}
 
@@ -477,10 +483,10 @@ def process_with_gemini(user_msg: str, group_id: str, user_id: str,
         return "\n\n".join(results) if results else "好的，已處理完成！"
 
     if intent_json.get("action") == "_quota_exhausted":
-        if is_private:
-            rule_cat = classify_by_rules(user_msg)
-            if rule_cat:
-                return handle_save_collection({"content": user_msg}, user_id)
+        owner_id = user_id if is_private else group_id
+        rule_cat = classify_by_rules(user_msg)
+        if rule_cat:
+            return handle_save_collection({"content": user_msg}, owner_id)
         return ("⚠️ AI 額度今日已滿，進階功能暫停。\n"
                 "基本指令仍可使用，請輸入精確關鍵字：\n"
                 "📅 今天行程 / 這週行程\n"
@@ -500,6 +506,7 @@ def _dispatch_intent(intent_json: dict, group_id: str, user_id: str, is_private:
     """將單一 intent dict 分派到對應的 handler，回傳文字結果"""
     action = intent_json.get("action", "chat")
     data = intent_json.get("data", {})
+    owner_id = user_id if is_private else group_id  # 收藏的 owner
 
     if action == "add_event":
         return handle_add_event(data, group_id, user_id)
@@ -547,11 +554,11 @@ def _dispatch_intent(intent_json: dict, group_id: str, user_id: str, is_private:
     elif action == "plan_trip":
         return handle_plan_trip(data, group_id, user_id)
     elif action == "save_collection":
-        return handle_save_collection(data, user_id)
+        return handle_save_collection(data, owner_id)
     elif action == "query_collections":
-        return handle_query_collections(data, user_id)
+        return handle_query_collections(data, owner_id)
     elif action == "search_collections":
-        return handle_search_collections(data, user_id)
+        return handle_search_collections(data, owner_id)
     elif action == "draft_reply":
         return handle_draft_reply(data)
     elif action == "summary":
