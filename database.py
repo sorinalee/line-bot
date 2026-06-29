@@ -307,6 +307,16 @@ class Database:
                 return dict(row)
         return None
 
+    def complete_all_todos(self, group_id: str) -> int:
+        """將所有 pending 待辦標記為完成並刪除"""
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "DELETE FROM todos WHERE group_id = %s AND status = 'pending'",
+                (group_id,),
+            )
+            return cur.rowcount
+
     # ── 購物清單 ────────────────────────────────────────
     def add_shopping_item(self, group_id: str, user_id: str, item: str):
         with self._get_conn() as conn:

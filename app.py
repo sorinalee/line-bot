@@ -395,6 +395,8 @@ def try_keyword_shortcut(user_msg: str, group_id: str, user_id: str,
         return "請告訴我要新增什麼待辦事項，例如「記得繳電費」"
     if msg in ["完成待辦"]:
         return "請告訴我要完成哪個待辦，例如「繳電費 完成了」"
+    if msg in ["全部完成", "待辦全部完成", "所有待辦都完成了"]:
+        return handle_complete_all_todos(group_id)
     if msg in ["新增購物"]:
         return "請告訴我要買什麼，例如「要買牛奶、雞蛋」"
     if msg in ["完成購物"]:
@@ -541,6 +543,8 @@ def _dispatch_intent(intent_json: dict, group_id: str, user_id: str, is_private:
         return handle_clear_shopping(group_id)
     elif action == "complete_all_shopping":
         return handle_complete_all_shopping(group_id)
+    elif action == "complete_all_todos":
+        return handle_complete_all_todos(group_id)
     elif action == "query_exchange":
         currency = data.get("currency", "")
         amount = data.get("amount", 0)
@@ -924,6 +928,13 @@ def handle_complete_all_shopping(group_id: str) -> str:
     if count > 0:
         return f"✅ 太棒了！購物清單 {count} 項全部完成 🎉"
     return "購物清單是空的，沒有需要完成的項目"
+
+
+def handle_complete_all_todos(group_id: str) -> str:
+    count = db.complete_all_todos(group_id)
+    if count > 0:
+        return f"✅ 太棒了！待辦清單 {count} 項全部完成 🎉"
+    return "待辦清單是空的，沒有需要完成的項目"
 
 
 # ── 生日 ──────────────────────────────────────────────

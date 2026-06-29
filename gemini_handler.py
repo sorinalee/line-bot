@@ -88,6 +88,9 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
 17. **complete_all_shopping** — 購物清單全部完成
     - 「全部買了」「都買了」「購物清單全部完成」→ {"action": "complete_all_shopping", "data": {}}
 
+17b. **complete_all_todos** — 待辦清單全部完成
+    - 「待辦全部完成」「所有待辦都做好了」「全部完成」（在待辦脈絡下）→ {"action": "complete_all_todos", "data": {}}
+
 18. **query_exchange** — 查詢匯率
     - 「美金匯率」→ {"action": "query_exchange", "data": {"currency": "美金", "amount": 0}}
     - 「日幣多少」→ {"action": "query_exchange", "data": {"currency": "日幣", "amount": 0}}
@@ -171,6 +174,7 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
 - 如果使用者一次提到多個待辦或購物項目，請全部放在 items 陣列裡
 - 「買了」「完成了」「搞定」「OK了」都是 complete_todo 或 complete_shopping
 - 「全部買了」「都買了」「購物清單全部完成」是 complete_all_shopping
+- 「待辦全部完成」「所有待辦都做好了」「全部完成」（待辦脈絡）是 complete_all_todos
 - 使用者一次提到多筆不同日期的行程時，add_event 用 items 陣列
 - 「改到」「延後」「提前」「改時間」「改日期」「換到」是 update_event
 - 「取消」「不去了」「刪掉行程」是 delete_event

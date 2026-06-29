@@ -475,12 +475,20 @@ def build_todos_flex(todos: list, is_group: bool = True) -> FlexMessage:
         },
         "footer": {
             "type": "box",
-            "layout": "horizontal",
+            "layout": "vertical",
             "contents": [
-                {"type": "button", "action": {"type": "message", "label": "✅ 完成項目", "text": "完成待辦"},
-                 "style": "primary", "color": "#27AE60", "height": "sm", "flex": 1},
-                {"type": "button", "action": {"type": "message", "label": "➕ 新增", "text": "新增待辦"},
-                 "style": "secondary", "height": "sm", "flex": 1, "margin": "sm"},
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "contents": [
+                        {"type": "button", "action": {"type": "message", "label": "✅ 完成項目", "text": "完成待辦"},
+                         "style": "primary", "color": "#27AE60", "height": "sm", "flex": 1},
+                        {"type": "button", "action": {"type": "message", "label": "➕ 新增", "text": "新增待辦"},
+                         "style": "secondary", "height": "sm", "flex": 1, "margin": "sm"},
+                    ],
+                },
+                {"type": "button", "action": {"type": "message", "label": "🎉 全部完成", "text": "待辦全部完成"},
+                 "style": "secondary", "height": "sm", "margin": "sm"},
             ],
             "paddingAll": "10px",
         },
