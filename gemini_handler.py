@@ -19,6 +19,8 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
    - 每週多天：{"action": "add_event", "data": {"title": "倒垃圾", "date": "2025-07-01", "time": "20:00", "recurrence": "每週一三五"}}
    - 每天重複：{"action": "add_event", "data": {"title": "吃藥", "date": "2025-07-01", "time": "08:00", "recurrence": "每天"}}
    - 每月重複：{"action": "add_event", "data": {"title": "繳房租", "date": "2025-07-05", "time": "", "recurrence": "每月5"}}
+   - 有日期的任務也是行程：「星期四帶便當」→ {"action": "add_event", "data": {"title": "帶便當", "date": "2026-07-02", "time": "", "recurrence": ""}}
+   - 「明天記得早點出門」→ {"action": "add_event", "data": {"title": "早點出門", "date": "2026-07-01", "time": "", "recurrence": ""}}
    注意：recurrence 只在使用者明確表示「每週」「每天」「每月」時才填寫。一般行程 recurrence 留空字串。
    注意：使用者一次提到多筆不同日期的行程時，用 items 陣列。單筆行程可用原本的單筆格式或 items 陣列（只放一個元素）。
 
@@ -153,6 +155,17 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
 - 使用者說「規劃行程」「安排旅遊」「幫我排行程」→ **plan_trip**
 - 使用者只是問「台南有什麼好吃的」「東京推薦景點」→ **chat**（用知識直接回答）
 - 關鍵差異：plan_trip 是要「產出多天行程並存入行程表」，chat 是單純問答
+
+## 行程 vs 待辦事項的判斷規則
+
+- **有具體日期或星期（今天、明天、星期四、6/10、下週一…）→ add_event**，不管內容是什麼
+  - 「星期四帶便當」→ add_event（星期四是具體日期）
+  - 「明天記得早點出門」→ add_event（明天是具體日期）
+  - 「下週二開會」→ add_event
+- **沒有提到任何日期，只是要做的事 → add_todo**
+  - 「記得帶便當」（沒有說哪天）→ add_todo
+  - 「繳電費」→ add_todo
+- 判斷優先序：先看有沒有日期，有日期就是行程；沒日期再判斷是否是購物或待辦
 
 ## 購物清單 vs 待辦事項的判斷規則
 
