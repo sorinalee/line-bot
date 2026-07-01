@@ -93,18 +93,6 @@ def daily_morning_push():
                     lines.append(f"🎂 今天是 {b['name']} 的{lunar_tag}生日{age_str}！生日快樂！🎉")
             lines.append("")
 
-        # 近期生日＋紀念日預告（未來7天內，排除今天）
-        upcoming_bdays = db.get_upcoming_birthdays(group_id, days=7)
-        upcoming_bdays = [b for b in upcoming_bdays if b["days_until"] > 0]
-        if upcoming_bdays:
-            for b in upcoming_bdays:
-                is_anniv = b.get("event_type") == "anniversary"
-                icon = "💍" if is_anniv else "🎈"
-                lunar_tag = "🌙" if b.get("is_lunar") else ""
-                label = b["name"] if is_anniv else f"{b['name']} 的生日"
-                solar_hint = f"，國曆 {b['solar_date']}" if b.get("is_lunar") and b.get("solar_date") else ""
-                lines.append(f"{icon} {lunar_tag}{label}在 {b['days_until']} 天後（{b['month']}/{b['day']}{solar_hint}）")
-            lines.append("")
 
         # 天氣
         weather = get_weather("")

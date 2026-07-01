@@ -431,13 +431,15 @@ def try_keyword_shortcut(user_msg: str, group_id: str, user_id: str,
             return handle_retry_ocr(user_id)
         if msg.startswith("修改收藏"):
             return handle_edit_collection(msg, user_id)
-        if msg.startswith("刪除收藏"):
-            return handle_delete_collection(msg, user_id)
+        if msg.startswith("刪除收藏") or msg.startswith("取消收藏"):
+            normalized = msg.replace("取消收藏", "刪除收藏", 1)
+            return handle_delete_collection(normalized, user_id)
         if msg in ["清空收藏", "刪除全部收藏"]:
             return handle_clear_collections(user_id)
     else:
-        if msg.startswith("刪除收藏"):
-            return handle_delete_collection(msg, group_id)
+        if msg.startswith("刪除收藏") or msg.startswith("取消收藏"):
+            normalized = msg.replace("取消收藏", "刪除收藏", 1)
+            return handle_delete_collection(normalized, group_id)
         if msg in ["清空收藏", "刪除全部收藏"]:
             return handle_clear_collections(group_id)
 
@@ -559,6 +561,9 @@ def _dispatch_intent(intent_json: dict, group_id: str, user_id: str, is_private:
         return handle_plan_trip(data, group_id, user_id)
     elif action == "save_collection":
         return handle_save_collection(data, owner_id)
+    elif action == "delete_collection":
+        keyword = data.get("keyword", "")
+        return handle_delete_collection(f"刪除收藏 {keyword}", owner_id)
     elif action == "query_collections":
         return handle_query_collections(data, owner_id)
     elif action == "search_collections":

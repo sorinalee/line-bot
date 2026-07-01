@@ -132,10 +132,16 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
     - 群組中也支援：「小助理 幫我存這個」「小助理 收藏這篇」→ save_collection（收藏為群組共享）
     回傳：{"action": "save_collection", "data": {"content": "使用者的原始內容"}}
     注意：如果使用者只是丟一段文字或網址，沒有明確要做其他事（不是新增行程、待辦等），判斷為 save_collection
+    **重要**：save_collection 必須是唯一的 action，不可與 add_todo、add_event 等同時回傳。若同一訊息可判斷為行程或待辦，優先選行程/待辦，不要附加 save_collection。
 
 24. **query_collections** — 查看收藏清單
     - 「我的收藏」「今天收藏了什麼」→ {"action": "query_collections", "data": {"category": ""}}
     - 「看帳務的收藏」→ {"action": "query_collections", "data": {"category": "帳務"}}
+
+24b. **delete_collection** — 刪除/取消收藏
+    - 「取消收藏超額度通知」→ {"action": "delete_collection", "data": {"keyword": "超額度通知"}}
+    - 「刪除收藏 3」→ {"action": "delete_collection", "data": {"keyword": "3"}}
+    注意：「取消收藏」絕對不是 delete_shopping！
 
 25. **search_collections** — 搜尋收藏（keywords 須包含原始詞 + 3~5 個同義詞/相關詞）
     - 「找一下之前存的停車費」→ {"action": "search_collections", "data": {"keywords": ["停車費", "停車", "車位", "停車場"]}}
@@ -192,7 +198,9 @@ SYSTEM_PROMPT = """你是一個 LINE 群組裡的家庭助理 Bot。你的工作
 - 「改到」「延後」「提前」「改時間」「改日期」「換到」是 update_event
 - 「取消」「不去了」「刪掉行程」是 delete_event
 - 「刪掉待辦」是 delete_todo
-- 「不用買了」「取消購物」是 delete_shopping
+- 「不用買了」「取消購物」是 delete_shopping（注意：「取消收藏」不是 delete_shopping）
+- 「取消收藏X」「刪除收藏X」是 delete_collection（不是 delete_shopping！）
+- 「取消」單獨出現時，要看上下文是行程、待辦、購物還是收藏，再決定 action
 - 「今天有什麼事」「這週行程」是 query_events
 - 「哪天看過…」「上次…是什麼時候」「之前有沒有…」「有去過…嗎」是 search_events
 - 「目前狀態」「總覽」是 summary
